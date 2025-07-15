@@ -3,7 +3,6 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
-const helmet = require("helmet"); // ← install helmet
 const connectDB = require("./config/db");
 
 const authRoutes = require("./routes/authRoutes");
@@ -29,29 +28,6 @@ app.use(
     },
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
-
-// Helmet with a CSP that allows data: URIs for images
-app.use(
-  helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        // allow scripts/styles from self
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        // allow images from your domain *and* inline (data:)
-        imgSrc: ["'self'", "data:", "https://backend-mu6d.onrender.com"],
-        VideoSrc: ["'self'", "data:", "https://backend-mu6d.onrender.com"], // allow inline videos
-        // optional: fonts/icons from self or any CDN you use
-        fontSrc: ["'self'" /* other font hosts... */],
-        connectSrc: ["'self'", "https://backend-mu6d.onrender.com"],
-        frameSrc: ["'none'"],
-        objectSrc: ["'none'"],
-        upgradeInsecureRequests: [],
-      },
-    },
   })
 );
 
