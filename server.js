@@ -16,7 +16,7 @@ const app = express();
 const allowedOrigins = [
   "https://backend-mu6d.onrender.com",
   "https://uaacaiinternational.org",
-  "http://localhost:5173/",
+  "http://localhost:5173",
 ];
 
 app.use(
