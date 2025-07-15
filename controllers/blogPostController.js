@@ -189,7 +189,7 @@ const searchPosts = async (req, res) => {
     const q = req.query.q;
     const posts = await BlogPost.find({
       isDraft: false,
-      sort: [
+      $or: [
         { title: { $regex: q, $options: "i" } },
         { content: { $regex: q, $options: "i" } },
       ],
