@@ -1,3 +1,4 @@
+// server.js
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -12,21 +13,36 @@ const aiRoutes = require("./routes/aiRoutes");
 
 const app = express();
 
-// --- CORS whitelist for your Render URL (and others) ---
+// ---- GLOBAL NO‑CACHE HEADERS ----
+app.use((req, res, next) => {
+  res.set(
+    "Cache-Control",
+    "no-store, no-cache, must-revalidate, proxy-revalidate"
+  );
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+  res.set("Surrogate-Control", "no-store");
+  next();
+});
+
+// ---- CORS WHITELIST ----
 const allowedOrigins = [
-  "https://backend-mu6d.onrender.com",
+  "https://backend‑mu6d.onrender.com",
   "https://uaacaiinternational.org",
   "http://localhost:5173",
+  /\.vercel\.app$/, // allow all *.vercel.app preview URLs
 ];
 
 app.use(
   cors({
     origin(origin, callback) {
-      // allow requests with no origin (e.g. mobile apps or curl)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
+      const ok = allowedOrigins.some((o) =>
+        typeof o === "string"
+          ? o === origin
+          : o instanceof RegExp && o.test(origin)
+      );
+      if (ok) return callback(null, true);
       callback(new Error(`CORS policy blocked access from ${origin}`));
     },
     methods: ["GET", "POST", "PUT", "DELETE"],
@@ -34,17 +50,18 @@ app.use(
   })
 );
 
-// connect to DB, parse JSON, serve routes...
+// ---- DB + JSON ----
 connectDB();
 app.use(express.json());
 
+// ---- ROUTES ----
 app.use("/api/auth", authRoutes);
 app.use("/api/posts", blogPostRoutes);
 app.use("/api/comments", commentRoutes);
 app.use("/api/dashboard-summary", dashboardRoutes);
 app.use("/api/ai", aiRoutes);
 
-// serve uploads statically
+// ---- SERVE UPLOADS ----
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 const PORT = process.env.PORT || 3002;
