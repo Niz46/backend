@@ -68,6 +68,14 @@ app.use(
 app.use(express.json());
 connectDB();
 
+// Cache-Control for APIs
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/")) {
+    res.setHeader("Cache-Control", "no-store");
+  }
+  next();
+});
+
 // ─── API Route Mounting ───────────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
 app.use("/api/posts", blogPostRoutes);
@@ -81,9 +89,13 @@ app.use(
   "/uploads",
   cors({
     origin: allowedOrigins,
-    methods: ["GET", "HEAD", "OPTIONS"],
   }),
-  express.static(uploadDir)
+  express.static(uploadDir, {
+    maxAge: "1d",
+    setHeaders: (res) => {
+      res.setHeader("Cache-Control", "public, max-age=86400");
+    },
+  })
 );
 
 // ─── Global Error Handler ─────────────────────────────────────────────────────
