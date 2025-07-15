@@ -195,7 +195,6 @@ const searchPosts = async (req, res) => {
       ],
     })
       .populate("author", "name profileImageUrl")
-      .sort({ updatedAt: -1 });
     res.json(posts);
   } catch (err) {
     res.status(500).json({ message: "Server Error", err: err.message });
