@@ -30,6 +30,7 @@ const allowedOrigins = [
   "https://uaacaiinternational.org",
   "http://localhost:5173",
 ];
+
 app.use(
   cors({
     origin(origin, callback) {
@@ -37,10 +38,12 @@ app.use(
       if (allowedOrigins.includes(origin)) return callback(null, true);
       callback(new Error(`CORS blocked from ${origin}`));
     },
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
+app.options("*", cors());
 
 // 4. Body parser & DB
 app.use(express.json());
@@ -54,7 +57,11 @@ app.use("/api/dashboard-summary", dashboardRoutes);
 app.use("/api/ai", aiRoutes);
 
 // 6. Serve uploads statically
-app.use("/uploads", express.static(uploadDir));
+app.use(
+  "/uploads",
+  cors({ origin: allowedOrigins }),
+  express.static(uploadDir)
+);
 
 // 7. Global error handler (after all routes)
 app.use((err, req, res, next) => {
