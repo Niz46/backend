@@ -1,4 +1,3 @@
-// server.js
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -14,34 +13,30 @@ const aiRoutes = require("./routes/aiRoutes");
 
 const app = express();
 
-// 1. Ensure `uploads/` directory exists
+// 1. Ensure uploads directory exists
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
   console.log(`✅ Created uploads directory at ${uploadDir}`);
 }
 
-// 2. Trust proxy (for correct req.protocol behind Render’s router)
+// 2. Trust proxy for correct req.protocol
 app.set("trust proxy", true);
 
-// 3. CORS config
+// 3. Global CORS (including OPTIONS & HEAD)
 const allowedOrigins = [
   "https://backend-mu6d.onrender.com",
   "https://uaacaiinternational.org",
   "http://localhost:5173",
 ];
-
 app.use(
   cors({
-    origin(origin, callback) {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      callback(new Error(`CORS blocked from ${origin}`));
-    },
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    origin: allowedOrigins,
+    methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+app.options("*", cors()); // handle pre‑flight requests
 
 // 4. Body parser & DB
 app.use(express.json());
@@ -54,10 +49,10 @@ app.use("/api/comments", commentRoutes);
 app.use("/api/dashboard-summary", dashboardRoutes);
 app.use("/api/ai", aiRoutes);
 
-// 6. Serve uploads statically
+// 6. Serve uploads with CORS
 app.use("/uploads", express.static(uploadDir));
 
-// 7. Global error handler (after all routes)
+// 7. Global error handler
 app.use((err, req, res, next) => {
   console.error("💥 Unhandled error:", err.stack || err);
   res.status(500).json({ message: err.message || "Internal Server Error" });
