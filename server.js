@@ -2,16 +2,17 @@
 
 require("dotenv").config();
 const express = require("express");
-const cors    = require("cors");
-const path    = require("path");
-const fs      = require("fs");
+const cors = require("cors");
+const path = require("path");
+const helmet = require("helmet");
+const fs = require("fs");
 const connectDB = require("./config/db");
 
-const authRoutes      = require("./routes/authRoutes");
-const blogPostRoutes  = require("./routes/blogPostRoutes");
-const commentRoutes   = require("./routes/commentRoutes");
+const authRoutes = require("./routes/authRoutes");
+const blogPostRoutes = require("./routes/blogPostRoutes");
+const commentRoutes = require("./routes/commentRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
-const aiRoutes        = require("./routes/aiRoutes");
+const aiRoutes = require("./routes/aiRoutes");
 
 const app = express();
 
@@ -22,6 +23,25 @@ app.disable("x-powered-by");
 // If you’re behind a proxy (e.g. Render), ensure correct protocol resolution
 app.set("trust proxy", true);
 
+// ─── Helmet Security Headers ──────────────────────────────────────────────────
+app.use(helmet()); // Sets sensible defaults for security
+app.use(helmet.noSniff()); // Prevent MIME-type sniffing
+app.use(helmet.frameguard({ action: "deny" })); // Prevent clickjacking
+app.use(
+  helmet.contentSecurityPolicy({
+    // CSP: Block inline JS & eval by default
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "https:"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "https://uaacaiinternational-api.onrender.com"],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: [],
+    },
+  })
+);
+
 // ─── Ensure Uploads Directory ─────────────────────────────────────────────────
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) {
@@ -31,7 +51,7 @@ if (!fs.existsSync(uploadDir)) {
 
 // ─── CORS Configuration ────────────────────────────────────────────────────────
 const allowedOrigins = [
-  "https://backend-mu6d.onrender.com",
+  "https://uaacaiinternational-api.onrender.com",
   "https://uaacaiinternational.org",
   "http://localhost:5173",
 ];
@@ -49,11 +69,11 @@ app.use(express.json());
 connectDB();
 
 // ─── API Route Mounting ───────────────────────────────────────────────────────
-app.use("/api/auth",            authRoutes);
-app.use("/api/posts",           blogPostRoutes);
-app.use("/api/comments",        commentRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/posts", blogPostRoutes);
+app.use("/api/comments", commentRoutes);
 app.use("/api/dashboard-summary", dashboardRoutes);
-app.use("/api/ai",              aiRoutes);
+app.use("/api/ai", aiRoutes);
 
 // ─── Static Assets (Uploads) ───────────────────────────────────────────────────
 // Wrap in its own CORS so every file response carries the header
