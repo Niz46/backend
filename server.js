@@ -15,6 +15,7 @@ const app = express();
 // --- CORS whitelist for your Render URL (and others) ---
 const allowedOrigins = [
   "https://backend-mu6d.onrender.com",
+  "https://uaacaiinternational.org",
   "http://localhost:5173/",
 ];
 
