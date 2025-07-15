@@ -13,7 +13,7 @@ const uploadVideo = require("../middlewares/uploadVideoMiddleware");
 const router = express.Router();
 
 // must be set in your .env or Render dashboard
-//   BACKEND_URL=https://backend-mu6d.onrender.com
+//   BACKEND_URL=https://uaacaiinternational-api.onrender.com
 const BACKEND_URL = process.env.BACKEND_URL;
 if (!BACKEND_URL) {
   console.warn("⚠️  BACKEND_URL is not defined!");
