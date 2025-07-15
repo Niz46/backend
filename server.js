@@ -38,12 +38,10 @@ app.use(
       if (allowedOrigins.includes(origin)) return callback(null, true);
       callback(new Error(`CORS blocked from ${origin}`));
     },
-    methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-
-app.options("*", cors());
 
 // 4. Body parser & DB
 app.use(express.json());
@@ -57,11 +55,7 @@ app.use("/api/dashboard-summary", dashboardRoutes);
 app.use("/api/ai", aiRoutes);
 
 // 6. Serve uploads statically
-app.use(
-  "/uploads",
-  cors({ origin: allowedOrigins }),
-  express.static(uploadDir)
-);
+app.use("/uploads", express.static(uploadDir));
 
 // 7. Global error handler (after all routes)
 app.use((err, req, res, next) => {
