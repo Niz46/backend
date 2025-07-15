@@ -87,7 +87,7 @@ const updatePost = async (req, res) => {
 const deletePost = async (req, res) => {
   try {
     const postId = req.params.id;
-    const post   = await BlogPost.findById(postId);
+    const post = await BlogPost.findById(postId);
     if (!post) {
       return res.status(404).json({ message: "Post not found" });
     }
@@ -193,7 +193,9 @@ const searchPosts = async (req, res) => {
         { title: { $regex: q, $options: "i" } },
         { content: { $regex: q, $options: "i" } },
       ],
-    }).populate("author", "name profileImageUrl");
+    })
+      .populate("author", "name profileImageUrl")
+      .sort({ updatedAt: -1 });
     res.json(posts);
   } catch (err) {
     res.status(500).json({ message: "Server Error", err: err.message });
