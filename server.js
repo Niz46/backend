@@ -19,6 +19,7 @@ const allowedOrigins = [
   "https://uaacaiinternational.org",
   "http://localhost:5173",
 ];
+app.set("trust proxy", true);
 app.use(
   cors({
     origin(origin, callback) {
@@ -46,3 +47,9 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 const PORT = process.env.PORT || 3002;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+// at the very bottom of server.js, before app.listen(...)
+app.use((err, req, res, next) => {
+  console.error("💥 Unhandled error:", err.stack || err);
+  res.status(500).json({ message: err.message || "Internal Server Error" });
+});
