@@ -36,7 +36,7 @@ const blogSummaryPrompt = (blogContent) => `
     Instructions:
     - Read the blog post content below.
     - Generate a short, catchy, SEO-friendly title (max 17 words).
-    - Write a clear, engaging summary of about 170 words.
+    - Write a clear, engaging summary of about 100 words.
     - At the end of the summary, add a markdown of section titled **# What You'll Learn**.
     - Under that hearing, list 3-5 takeways or skills or points the reader will learn in **bullet points** using markdown (\`- \`).
 
