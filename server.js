@@ -72,6 +72,7 @@ app.use("/api/posts", require("./routes/blogPostRoutes"));
 app.use("/api/comments", require("./routes/commentRoutes"));
 app.use("/api/dashboard-summary", require("./routes/dashboardRoutes"));
 app.use("/api/ai", require("./routes/aiRoutes"));
+app.use("/api/users", require("./routes/userRoutes"));
 
 // ─── 9) CORS preflight for uploads ─────────────────────────────────────────────
 app.options("/uploads/*path", cors(uploadCorsOptions));
