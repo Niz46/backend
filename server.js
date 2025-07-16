@@ -79,23 +79,29 @@ app.options("/uploads/*path", cors(uploadCorsOptions));
 // ─── 10) Serve uploads with CORS + video/image cache logic ───────────────────
 app.use(
   "/uploads",
+  // you can keep cors() here for OPTIONS+regular GET:
   cors(uploadCorsOptions),
   express.static(uploadDir, {
     setHeaders: (res, filePath) => {
       const contentType = mime.lookup(filePath) || "";
 
+      // 1) Manually re‐add the ACAO header
+      res.setHeader(
+        "Access-Control-Allow-Origin",
+        // you could use '*' or better, echo back the request’s origin:
+        res.req.headers.origin || allowedOrigins[0]
+      );
+
+      // 2) Your cache headers:
       if (contentType.startsWith("video/")) {
-        // videos: cache 1 hour
         res.setHeader("Cache-Control", "public, max-age=3600");
       } else if (contentType.startsWith("image/")) {
-        // images: cache 1 day
         res.setHeader("Cache-Control", "public, max-age=86400");
       } else {
-        // others: default
         res.setHeader("Cache-Control", "public, max-age=3600");
       }
 
-      // expose range headers so <video> can partial-load
+      // 3) Expose range headers
       res.setHeader(
         "Access-Control-Expose-Headers",
         uploadCorsOptions.exposedHeaders.join(",")
