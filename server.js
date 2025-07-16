@@ -24,24 +24,22 @@ app.disable("x-powered-by");
 app.set("trust proxy", true);
 
 // ─── Helmet Security Headers ──────────────────────────────────────────────────
-app.use(helmet()); // Sets sensible defaults for security
-app.use(helmet.noSniff()); // Prevent MIME-type sniffing
-app.use(helmet.frameguard({ action: "deny" })); // Prevent clickjacking
+app.use(helmet()); // includes noSniff, frameguard, etc.
+
+// 2) Custom CSP
 app.use(
   helmet.contentSecurityPolicy({
-    // CSP: Block inline JS & eval by default
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "https:"],
-      imgSrc: ["'self'", "data:", "https:"],
+      imgSrc: ["'self'", "https:", "data:"],
       connectSrc: ["'self'", "https://uaacaiinternational-api.onrender.com"],
+      frameAncestors: ["'none'"],
       objectSrc: ["'none'"],
-      upgradeInsecureRequests: [],
     },
   })
 );
-
 // ─── Ensure Uploads Directory ─────────────────────────────────────────────────
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) {
