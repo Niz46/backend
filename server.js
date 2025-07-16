@@ -82,16 +82,31 @@ app.use("/api/dashboard-summary", dashboardRoutes);
 app.use("/api/ai", aiRoutes);
 
 // ─── Static Assets (Uploads) ───────────────────────────────────────────────────
-// Wrap in its own CORS so every file response carries the header
+const uploadCorsOptions = {
+  origin: allowedOrigins,
+  methods: ["GET", "HEAD", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Range"],
+  exposedHeaders: ["Accept-Ranges", "Content-Range", "Content-Length"],
+};
+
+app.options("/uploads/*path", cors(uploadCorsOptions));
+
 app.use(
   "/uploads",
-  cors({
-    origin: allowedOrigins,
-  }),
+  // 1) CORS middleware injects the headers you need…
+  cors(uploadCorsOptions),
+
+  // 2) …then serve static files (including Range/206 responses)
   express.static(uploadDir, {
     maxAge: "1d",
-    setHeaders: (res) => {
+    setHeaders: (res, filePath) => {
+      // Standard cache header
       res.setHeader("Cache-Control", "public, max-age=86400");
+      // Expose range headers so <video> can resume/download parts
+      res.setHeader(
+        "Access-Control-Expose-Headers",
+        uploadCorsOptions.exposedHeaders.join(",")
+      );
     },
   })
 );
