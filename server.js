@@ -96,6 +96,16 @@ app.use(
   })
 );
 
+// Add a simple landing page at the root URL
+app.get("/", (req, res) => {
+  res.send("✅ UAACAI API is up and running. Visit /api/* for endpoints.");
+});
+
+// Catch-all for any undefined routes (returns JSON 404)
+app.use((req, res) => {
+  res.status(404).json({ message: "Endpoint not found" });
+});
+
 // ─── Global Error Handler ─────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error("💥 Unhandled error:", err.stack || err);
