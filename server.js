@@ -31,7 +31,7 @@ app.use(
   helmet.contentSecurityPolicy({
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-eval'"],
+      scriptSrc: ["'self'"],
       styleSrc: ["'self'", "https:"],
       imgSrc: ["'self'", "https:", "data:"],
       connectSrc: ["'self'", "https://uaacaiinternational-api.onrender.com"],
