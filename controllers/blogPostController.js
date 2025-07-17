@@ -2,6 +2,7 @@ const { parse } = require("dotenv");
 const BlogPost = require("../models/BlogPost");
 const mongoose = require("mongoose");
 const { post } = require("../routes/authRoutes");
+const sendEmail = require("../libs/sendEmail");
 
 // @desc    Create a new blog post
 // @route   POST /api/posts
@@ -35,6 +36,13 @@ const createPost = async (req, res) => {
     });
 
     await newPost.save();
+
+    const subscribers = await User.find({ role: "member" }).select("email");
+    await sendEmail({
+      to: subscribers.map((u) => u.email),
+      subject: `New post: ${newPost.title}`,
+      html: `<p>Check out our new post: <a href="${FRONTEND_URL}/${newPost.slug}">${newPost.title}</a></p>`,
+    });
     res.status(201).json(newPost);
   } catch (err) {
     res
@@ -155,12 +163,20 @@ const getPostBySlug = async (req, res) => {
       "author",
       "name profileImageUrl"
     );
+
     if (!post) return res.status(404).json({ message: "Post not found" });
-    res.json(post);
+
+    // Determine if this user has liked
+    const hasLiked = req.user
+      ? post.likedBy.some((id) => id.toString() === req.user._id.toString())
+      : false;
+
+    res.json({
+      ...post.toObject(),
+      hasLiked,
+    });
   } catch (err) {
-    res
-      .status(500)
-      .json({ message: "Failed to get post by slug", err: err.message });
+    res.status(500).json({ message: "Failed to get post", error: err.message });
   }
 };
 
@@ -193,8 +209,7 @@ const searchPosts = async (req, res) => {
         { title: { $regex: q, $options: "i" } },
         { content: { $regex: q, $options: "i" } },
       ],
-    })
-      .populate("author", "name profileImageUrl")
+    }).populate("author", "name profileImageUrl");
     res.json(posts);
   } catch (err) {
     res.status(500).json({ message: "Server Error", err: err.message });
@@ -219,11 +234,31 @@ const incrementView = async (req, res) => {
 // @route   PUT /api/posts/:id/like
 // @access  Public
 const likePost = async (req, res) => {
+  const userId = req.user._id;
+  const postId = req.params.id;
+
   try {
-    await BlogPost.findByIdAndUpdate(req.params.id, { $inc: { likes: 1 } });
-    res.json({ message: "Like added" });
+    const post = await BlogPost.findById(postId);
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    // Check if user has already liked
+    if (post.likedBy.includes(userId)) {
+      return res
+        .status(200)
+        .json({ message: "Already liked", likes: post.likes });
+    }
+
+    // Add user to likedBy and increment count
+    post.likedBy.push(userId);
+    post.likes += 1;
+    await post.save();
+
+    return res.status(200).json({ message: "Like added", likes: post.likes });
   } catch (err) {
-    res.status(500).json({ message: "Failed to like post", err: err.message });
+    console.error("Error liking post:", err);
+    return res
+      .status(500)
+      .json({ message: "Failed to like post", error: err.message });
   }
 };
 

@@ -16,6 +16,7 @@ const BlogPostSchema = new mongoose.Schema(
     isDraft: { type: Boolean, default: false },
     views: { type: Number, default: 0 },
     likes: { type: Number, default: 0 },
+    likedBy:    [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     generatedByAI: { type: Boolean, default: false },
   },
   { timestamps: true }
