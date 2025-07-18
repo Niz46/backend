@@ -1,6 +1,7 @@
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const agenda = require("../config/agenda");
 
 const generateToken = (userId) => {
   return jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: "7d" });
@@ -39,6 +40,19 @@ const registerUser = async (req, res) => {
       role,
     });
 
+    await agenda.now("send-welcome-email", {
+      to: user.email,
+      name: user.name,
+    });
+    await agenda.schedule("in 3 days", "send-nudge-email", {
+      to: user.email,
+      name: user.name,
+    });
+    await agenda.every("30 days", "send-monthly-reminder", {
+      to: user.email,
+      name: user.name,
+    });
+
     res.status(201).json({
       _id: user._id,
       name: user.name,
@@ -69,6 +83,11 @@ const loginUser = async (req, res) => {
     if (!isMatch) {
       return res.status(500).json({ message: "Invalid email or password" });
     }
+
+    await agenda.now("send-welcome-email", {
+      to: user.email,
+      name: user.name,
+    });
 
     res.json({
       _id: user._id,

@@ -2,7 +2,7 @@ const { parse } = require("dotenv");
 const BlogPost = require("../models/BlogPost");
 const mongoose = require("mongoose");
 const { post } = require("../routes/authRoutes");
-const sendEmail = require("../libs/sendEmail");
+const agenda = require("../config/agenda");
 
 // @desc    Create a new blog post
 // @route   POST /api/posts
@@ -36,13 +36,16 @@ const createPost = async (req, res) => {
     });
 
     await newPost.save();
-
+    
     const subscribers = await User.find({ role: "member" }).select("email");
-    await sendEmail({
-      to: subscribers.map((u) => u.email),
-      subject: `New post: ${newPost.title}`,
-      html: `<p>Check out our new post: <a href="${FRONTEND_URL}/${newPost.slug}">${newPost.title}</a></p>`,
+
+    // 3) Schedule the broadcast job immediately
+    await agenda.now("broadcast-new-post", {
+      emails: subscribers.map(u => u.email),
+      postTitle: newPost.title,
+      postUrl: `${process.env.FRONTEND_URL}/${newPost.slug}`,
     });
+    
     res.status(201).json(newPost);
   } catch (err) {
     res

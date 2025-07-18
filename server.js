@@ -9,6 +9,14 @@ const fs = require("fs");
 const mime = require("mime-types");
 const connectDB = require("./config/db");
 
+require("./jobs/emailJobs");
+
+const agenda = require("./config/agenda");
+(async function () {
+  await agenda.start();
+  console.log("✅ Agenda scheduler started");
+})();
+
 // ─── 1) Allowed origins ───────────────────────────────────────────────────────
 const allowedOrigins = [
   "https://uaacaiinternational-api.onrender.com",
