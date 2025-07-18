@@ -3,6 +3,7 @@ const BlogPost = require("../models/BlogPost");
 const mongoose = require("mongoose");
 const { post } = require("../routes/authRoutes");
 const agenda = require("../config/agenda");
+const User = require("../models/User");
 
 // @desc    Create a new blog post
 // @route   POST /api/posts
