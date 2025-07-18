@@ -12,12 +12,8 @@ const uploadVideo = require("../middlewares/uploadVideoMiddleware");
 
 const router = express.Router();
 
-// must be set in your .env or Render dashboard
-//   BACKEND_URL=https://uaacaiinternational-api.onrender.com
 const BACKEND_URL = process.env.BACKEND_URL;
-if (!BACKEND_URL) {
-  console.warn("⚠️  BACKEND_URL is not defined!");
-}
+if (!BACKEND_URL) console.warn("⚠️  BACKEND_URL is not defined!");
 
 function makeResponseUrl(filename) {
   const ts = Date.now();
@@ -27,55 +23,43 @@ function makeResponseUrl(filename) {
   };
 }
 
-// ---
-// AUTH
-// ---
+// --- AUTH ---
 router.post("/register", registerUser);
 router.post("/login", loginUser);
 router.get("/profile", protect, getUserProfile);
 
-// ---
-// IMAGE UPLOAD
-// ---
-router.post("/upload-image", (req, res) => {
-  // wrap multer so it never hangs
-  upload.single("image")(req, res, (err) => {
+// --- IMAGE UPLOAD (1 or MANY) ---
+router.post("/upload-images", (req, res) => {
+  // Accept up to 10 files from the `images` field
+  upload.array("images", 10)(req, res, (err) => {
     if (err) {
-      console.error("Multer error (image):", err);
+      console.error("Multer error (images):", err);
       return res.status(400).json({ message: err.message });
     }
-
-    console.log("→ /upload-image hit, file:", req.file && req.file.filename);
-
-    if (!req.file) {
-      console.warn("No file provided in /upload-image");
-      return res.status(400).json({ message: "No file uploaded" });
+    const files = req.files || [];
+    if (!files.length) {
+      return res.status(400).json({ message: "No images uploaded" });
     }
-
-    const { url: imageUrl, timestamp } = makeResponseUrl(req.file.filename);
-    return res.status(200).json({ imageUrl, timestamp });
+    // Map each saved filename into our URL format
+    const results = files.map((file) => makeResponseUrl(file.filename));
+    return res.status(200).json(results);
   });
 });
 
-// ---
-// VIDEO UPLOAD
-// ---
-router.post("/upload-video", (req, res) => {
-  uploadVideo.single("video")(req, res, (err) => {
+// --- VIDEO UPLOAD (1 or MANY) ---
+router.post("/upload-videos", (req, res) => {
+  // Accept up to 5 files from the `videos` field
+  uploadVideo.array("videos", 5)(req, res, (err) => {
     if (err) {
-      console.error("Multer error (video):", err);
+      console.error("Multer error (videos):", err);
       return res.status(400).json({ message: err.message });
     }
-
-    console.log("→ /upload-video hit, file:", req.file && req.file.filename);
-
-    if (!req.file) {
-      console.warn("No file provided in /upload-video");
-      return res.status(400).json({ message: "No video file uploaded" });
+    const files = req.files || [];
+    if (!files.length) {
+      return res.status(400).json({ message: "No videos uploaded" });
     }
-
-    const { url: videoUrl, timestamp } = makeResponseUrl(req.file.filename);
-    return res.status(200).json({ videoUrl, timestamp });
+    const results = files.map((file) => makeResponseUrl(file.filename));
+    return res.status(200).json(results);
   });
 });
 
