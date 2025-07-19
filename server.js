@@ -55,7 +55,7 @@ app.use(
 );
 
 // ─── 5) Ensure uploads directory exists ────────────────────────────────────────
-const uploadDir = path.join(__dirname, "..", "uploads");
+const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
   console.log(`✅ Created uploads directory at ${uploadDir}`);
