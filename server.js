@@ -19,7 +19,7 @@ const agenda = require("./config/agenda");
 
 // ─── 1) Allowed origins ───────────────────────────────────────────────────────
 const allowedOrigins = [
-  "https://uaacaiinternational-api.onrender.com",
+  "https://uaacainternational-api.onrender.com",
   "https://uaacaiinternational.org",
   "http://localhost:5173",
 ];
