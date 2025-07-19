@@ -44,7 +44,7 @@ const registerUser = async (req, res) => {
       to: user.email,
       name: user.name,
     });
-    await agenda.schedule("in 3 days", "send-nudge-email", {
+    await agenda.schedule("in 5 days", "send-nudge-email", {
       to: user.email,
       name: user.name,
     });
@@ -84,7 +84,7 @@ const loginUser = async (req, res) => {
       return res.status(500).json({ message: "Invalid email or password" });
     }
 
-    await agenda.now("send-welcome-email", {
+    await agenda.now("send-login-email", {
       to: user.email,
       name: user.name,
     });
