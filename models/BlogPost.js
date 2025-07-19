@@ -5,8 +5,8 @@ const BlogPostSchema = new mongoose.Schema(
     title: { type: String, required: true },
     slug: { type: String, required: true, unique: true },
     content: { type: String, required: true },
-    coverImageUrl: { type: String, default: null },
-    coverVideoUrl: { type: String, default: null },
+    coverImageUrl: { type: [String], default: [] },
+    coverVideoUrl: { type: [String], default: [] },
     tags: [{ type: String }],
     author: {
       type: mongoose.Schema.Types.ObjectId,
@@ -16,7 +16,7 @@ const BlogPostSchema = new mongoose.Schema(
     isDraft: { type: Boolean, default: false },
     views: { type: Number, default: 0 },
     likes: { type: Number, default: 0 },
-    likedBy:    [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    likedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     generatedByAI: { type: Boolean, default: false },
   },
   { timestamps: true }
