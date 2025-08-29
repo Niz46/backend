@@ -8,10 +8,12 @@ const helmet = require("helmet");
 const fs = require("fs");
 const mime = require("mime-types");
 
-const prisma = require("./config/prisma"); // ← Prisma client
-require("./jobs/emailJobs"); // Agenda job definitions that rely on MONGO_URL
+const prisma = require("./config/prisma"); // Prisma client
+const agenda = require("./config/agenda"); // Agenda (uses MONGO_URL)
 
-const agenda = require("./config/agenda");
+// IMPORTANT: require job definitions AFTER agenda is imported so they can import agenda
+// and define jobs before we call agenda.start().
+require("./jobs/emailJobs");
 
 const startAgenda = async () => {
   try {
@@ -22,18 +24,43 @@ const startAgenda = async () => {
   }
 };
 
+/**
+ * Robust Prisma connect with exponential backoff retries.
+ * Use env vars:
+ *   PRISMA_CONNECT_RETRIES (default 5)
+ *   PRISMA_CONNECT_BASE_DELAY_MS (default 500)
+ */
+async function connectPrismaWithRetry() {
+  const maxRetries = Number(process.env.PRISMA_CONNECT_RETRIES || 5);
+  const baseDelay = Number(process.env.PRISMA_CONNECT_BASE_DELAY_MS || 500);
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await prisma.$connect();
+      console.log("✅ Prisma connected to DATABASE_URL");
+      return;
+    } catch (err) {
+      const wait = baseDelay * Math.pow(2, attempt - 1);
+      console.warn(
+        `Prisma connect attempt ${attempt}/${maxRetries} failed: ${err.message}. retrying in ${wait}ms`
+      );
+      if (attempt === maxRetries) {
+        console.error("❌ Prisma connection error: exhausted retries", err);
+        // Decide: crash or continue. I prefer continuing so Agenda (Mongo) can still run,
+        // but in many apps you'd want to fail fast. Uncomment to exit:
+        // process.exit(1);
+        return;
+      }
+      await new Promise((res) => setTimeout(res, wait));
+    }
+  }
+}
+
 (async function init() {
   // Connect Prisma early so connection issues show up at boot
-  try {
-    await prisma.$connect();
-    console.log("✅ Prisma connected to DATABASE_URL");
-  } catch (err) {
-    console.error("❌ Prisma connection error:", err);
-    // We don't exit here to allow Agenda jobs still to work (if that's desired).
-    // Optionally: process.exit(1);
-  }
+  await connectPrismaWithRetry();
 
-  // Start Agenda (it uses process.env.MONGO_URL)
+  // Now start Agenda (it uses process.env.MONGO_URL and job definitions are already loaded)
   await startAgenda();
 })();
 
@@ -92,7 +119,6 @@ app.use(
 
 // ─── 7) Body parsing (Prisma does not require a separate connect call) ───────
 app.use(express.json());
-// previously: connectDB(); // removed - Prisma handles DB connections
 
 // ─── 8) Mount your API routes ─────────────────────────────────────────────────
 app.use("/api/auth", require("./routes/authRoutes"));
@@ -183,3 +209,15 @@ async function shutdown(signal) {
 
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+// Global handlers (log & exit if necessary)
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception:", err);
+  // Depending on your policy you may crash the process to get a clean restart:
+  // process.exit(1);
+});
+
+process.on("unhandledRejection", (reason, p) => {
+  console.error("Unhandled Rejection at Promise:", p, "reason:", reason);
+  // Optionally: process.exit(1);
+});
