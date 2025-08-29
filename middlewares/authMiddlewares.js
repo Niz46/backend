@@ -1,3 +1,4 @@
+// backend/middleware/auth.js or wherever protect is defined
 const jwt = require("jsonwebtoken");
 const prisma = require("../config/prisma");
 
@@ -8,14 +9,31 @@ const protect = async (req, res, next) => {
     if (token && token.startsWith("Bearer")) {
       token = token.split(" ")[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = await User.findById(decoded.id).select("-password");
-      next();
+
+      const user = await prisma.user.findUnique({
+        where: { id: decoded.id },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          profileImageUrl: true,
+        },
+      });
+
+      if (!user)
+        return res
+          .status(401)
+          .json({ message: "Not authorized: user not found" });
+
+      req.user = user;
+      return next();
     } else {
-      res.status(401).json({ message: "Not authorized, no token" });
+      return res.status(401).json({ message: "Not authorized, no token" });
     }
   } catch (err) {
-    res.status(401).json({ message: "Token failed", err: err.message });
+    console.error("protect:", err);
+    return res.status(401).json({ message: "Token failed", err: err.message });
   }
 };
-
 module.exports = { protect };
