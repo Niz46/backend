@@ -1,5 +1,5 @@
 const jwt = require("jsonwebtoken");
-const User = require("../models/User");
+const prisma = require("../config/prisma");
 
 const protect = async (req, res, next) => {
   try {
@@ -18,4 +18,4 @@ const protect = async (req, res, next) => {
   }
 };
 
-module.exports =  { protect }
+module.exports = { protect };

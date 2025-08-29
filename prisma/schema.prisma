@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String     @id @default(uuid())
+  name            String
+  email           String     @unique
+  password        String
+  profileImageUrl String?
+  bio             String?
+  role            String     @default("member")
+  posts           BlogPost[]
+  comments        Comment[]
+  likes           PostLike[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([email])
+}
+
+model BlogPost {
+  id            String     @id @default(uuid())
+  title         String
+  slug          String     @unique
+  content       String
+  coverImageUrl String[]   @default([])
+  coverVideoUrl String[]   @default([])
+  isDraft       Boolean    @default(false)
+  views         Int        @default(0)
+  likesCount    Int        @default(0)
+  generatedByAI Boolean    @default(false)
+  author        User       @relation(fields: [authorId], references: [id])
+  authorId      String
+  comments      Comment[]
+  postTags      PostTag[] // explicit join entries
+  likes         PostLike[]
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+}
+
+model Comment {
+  id        String    @id @default(uuid())
+  content   String
+  post      BlogPost  @relation(fields: [postId], references: [id])
+  postId    String
+  author    User      @relation(fields: [authorId], references: [id])
+  authorId  String
+  parentId  String?
+  parent    Comment?  @relation("CommentParent", fields: [parentId], references: [id])
+  replies   Comment[] @relation("CommentParent")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Tag {
+  id       String    @id @default(uuid())
+  name     String    @unique
+  postTags PostTag[]
+}
+
+model PostTag {
+  id        String   @id @default(uuid())
+  post      BlogPost @relation(fields: [postId], references: [id])
+  postId    String
+  tag       Tag      @relation(fields: [tagId], references: [id])
+  tagId     String
+  createdAt DateTime @default(now())
+
+  @@unique([postId, tagId])
+  @@index([postId])
+  @@index([tagId])
+}
+
+model PostLike {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  post      BlogPost @relation(fields: [postId], references: [id])
+  postId    String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId]) // user can like a post only once
+  @@index([postId])
+  @@index([userId])
+}

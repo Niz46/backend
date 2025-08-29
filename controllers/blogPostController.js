@@ -1,9 +1,7 @@
-const { parse } = require("dotenv");
-const BlogPost = require("../models/BlogPost");
-const mongoose = require("mongoose");
-const { post } = require("../routes/authRoutes");
+// backend/controllers/blogPostController.js
+const prisma = require("../config/prisma");
+const slugify = require("slugify");
 const agenda = require("../config/agenda");
-const User = require("../models/User");
 
 // @desc    Create a new blog post
 // @route   POST /api/posts
@@ -13,45 +11,59 @@ const createPost = async (req, res) => {
     const {
       title,
       content,
-      coverImageUrl,
-      coverVideoUrl,
-      tags,
-      isDraft,
-      generatedByAI,
+      coverImageUrl = [],
+      coverVideoUrl = [],
+      tags = [],
+      isDraft = false,
+      generatedByAI = false,
     } = req.body;
+    const authorId = req.user.id;
 
-    const slug = title
-      .toLowerCase()
-      .replace(/ /g, "-")
-      .replace(/[^\w-]+/g, "");
-    const newPost = new BlogPost({
-      title,
-      slug,
-      content,
-      coverImageUrl,
-      coverVideoUrl,
-      tags,
-      author: req.user._id,
-      isDraft,
-      generatedByAI,
+    if (!title || !content)
+      return res.status(400).json({ message: "Missing fields" });
+
+    const slug = slugify(title, { lower: true, strict: true });
+
+    // create tags if they don't exist and connect
+    const tagConnectOrCreate = tags.map((t) => ({
+      where: { name: t },
+      create: { name: t },
+    }));
+
+    const post = await prisma.blogPost.create({
+      data: {
+        title,
+        slug,
+        content,
+        coverImageUrl,
+        coverVideoUrl,
+        isDraft,
+        generatedByAI,
+        author: { connect: { id: authorId } },
+        tags: { connectOrCreate: tagConnectOrCreate },
+      },
+      include: {
+        author: { select: { id: true, name: true, profileImageUrl: true } },
+        tags: true,
+      },
     });
 
-    await newPost.save();
-    
-    const subscribers = await User.find({ role: "member" }).select("email");
-
-    // 3) Schedule the broadcast job immediately
+    const subscribers = await prisma.user.findMany({
+      where: { role: "member" },
+      select: { email: true },
+    });
     await agenda.now("broadcast-new-post", {
-      emails: subscribers.map(u => u.email),
-      postTitle: newPost.title,
-      postUrl: `${process.env.FRONTEND_URL}/${newPost.slug}`,
+      emails: subscribers.map((s) => s.email),
+      postTitle: post.title,
+      postUrl: `${process.env.FRONTEND_URL}/posts/${post.slug}`,
     });
-    
-    res.status(201).json(newPost);
+
+    res.status(201).json(post);
   } catch (err) {
+    console.error("createPost:", err);
     res
       .status(500)
-      .json({ message: "Failed to create a post", err: err.message });
+      .json({ message: "Failed to create post", err: err.message });
   }
 };
 
@@ -60,33 +72,40 @@ const createPost = async (req, res) => {
 // @access  Private (Author or Admin)
 const updatePost = async (req, res) => {
   try {
-    const post = await BlogPost.findById(req.params.id);
-    if (!post) return res.status(404).json({ message: "Post not found" });
+    const id = req.params.id;
+    const payload = req.body;
 
-    if (
-      post.author.toString() !== req.user._id.toString() &&
-      !req.user.isAdmin
-    ) {
-      return res
-        .status(403)
-        .json({ message: "Not authorized to update this post" });
+    if (payload.title) {
+      payload.slug = slugify(payload.title, { lower: true, strict: true });
     }
 
-    const updatedData = req.body;
-    if (updatedData.title) {
-      updatedData.slug = updatedData.title
-        .toLowerCase()
-        .replace(/ /g, "-")
-        .replace(/[^\w-]+/g, "");
+    // If tags are provided, map and connectOrCreate similar to create
+    if (payload.tags) {
+      const tagConnectOrCreate = payload.tags.map((t) => ({
+        where: { name: t },
+        create: { name: t },
+      }));
+      // remove tags from payload, handle separately
+      delete payload.tags;
+
+      const updated = await prisma.blogPost.update({
+        where: { id },
+        data: {
+          ...payload,
+          tags: { connectOrCreate: tagConnectOrCreate },
+        },
+      });
+
+      return res.json(updated);
     }
 
-    const updatePost = await BlogPost.findByIdAndUpdate(
-      req.params.id,
-      updatedData,
-      { new: true }
-    );
-    res.json(updatePost);
+    const updated = await prisma.blogPost.update({
+      where: { id },
+      data: payload,
+    });
+    res.json(updated);
   } catch (err) {
+    console.error("updatePost:", err);
     res
       .status(500)
       .json({ message: "Failed to update post", err: err.message });
@@ -98,17 +117,12 @@ const updatePost = async (req, res) => {
 // @access  Private (Author or Admin)
 const deletePost = async (req, res) => {
   try {
-    const postId = req.params.id;
-    const post = await BlogPost.findById(postId);
-    if (!post) {
-      return res.status(404).json({ message: "Post not found" });
-    }
-
-    await post.deleteOne();
-    return res.json({ message: "Post deleted" });
+    const id = req.params.id;
+    await prisma.blogPost.delete({ where: { id } });
+    res.json({ message: "Deleted" });
   } catch (err) {
-    console.error("Error in deletePost:", err);
-    return res
+    console.error("deletePost:", err);
+    res
       .status(500)
       .json({ message: "Failed to delete post", err: err.message });
   }
@@ -120,26 +134,33 @@ const deletePost = async (req, res) => {
 const getAllPosts = async (req, res) => {
   try {
     const status = req.query.status || "published";
-    const page = parseInt(req.query.page) || 1;
-    const limit = 5;
+    const page = parseInt(req.query.page || "1", 10);
+    const limit = parseInt(req.query.limit || "5", 10);
     const skip = (page - 1) * limit;
 
-    let filter = {};
-    if (status === "published") filter.isDraft = false;
-    else if (status === "draft") filter.isDraft = true;
+    const where =
+      status === "draft"
+        ? { isDraft: true }
+        : status === "published"
+          ? { isDraft: false }
+          : {};
 
-    const posts = await BlogPost.find(filter)
-      .populate("author", "name profileImageUrl")
-      .sort({ updateAt: -1 })
-      .skip(skip)
-      .limit(limit);
-
-    const [totalCount, allCount, publishedCount, draftCount] =
+    const [posts, totalCount, allCount, publishedCount, draftCount] =
       await Promise.all([
-        BlogPost.countDocuments(filter),
-        BlogPost.countDocuments(),
-        BlogPost.countDocuments({ isDraft: false }),
-        BlogPost.countDocuments({ isDraft: true }),
+        prisma.blogPost.findMany({
+          where,
+          orderBy: { updatedAt: "desc" },
+          skip,
+          take: limit,
+          include: {
+            author: { select: { id: true, name: true, profileImageUrl: true } },
+            tags: true,
+          },
+        }),
+        prisma.blogPost.count({ where }),
+        prisma.blogPost.count(),
+        prisma.blogPost.count({ where: { isDraft: false } }),
+        prisma.blogPost.count({ where: { isDraft: true } }),
       ]);
 
     res.json({
@@ -147,13 +168,10 @@ const getAllPosts = async (req, res) => {
       page,
       totalPages: Math.ceil(totalCount / limit),
       totalCount,
-      counts: {
-        all: allCount,
-        published: publishedCount,
-        draft: draftCount,
-      },
+      counts: { all: allCount, published: publishedCount, draft: draftCount },
     });
   } catch (err) {
+    console.error("getAllPosts:", err);
     res.status(500).json({ message: "Server Error", err: err.message });
   }
 };
@@ -163,71 +181,41 @@ const getAllPosts = async (req, res) => {
 // @access  Public
 const getPostBySlug = async (req, res) => {
   try {
-    const post = await BlogPost.findOne({ slug: req.params.slug }).populate(
-      "author",
-      "name profileImageUrl"
-    );
-
+    const slug = req.params.slug;
+    const post = await prisma.blogPost.findUnique({
+      where: { slug },
+      include: { author: true, tags: true },
+    });
     if (!post) return res.status(404).json({ message: "Post not found" });
 
-    // Determine if this user has liked
-    const hasLiked = req.user
-      ? post.likedBy.some((id) => id.toString() === req.user._id.toString())
-      : false;
+    // determine if current user liked
+    let hasLiked = false;
+    if (req.user && req.user.id) {
+      const like = await prisma.postLike
+        .findUnique({
+          where: { userId_postId: { userId: req.user.id, postId: post.id } },
+        })
+        .catch(() => null);
+      hasLiked = !!like;
+    }
 
-    res.json({
-      ...post.toObject(),
-      hasLiked,
-    });
+    res.json({ ...post, hasLiked });
   } catch (err) {
-    res.status(500).json({ message: "Failed to get post", error: err.message });
+    console.error("getPostBySlug:", err);
+    res.status(500).json({ message: "Failed to get post", err: err.message });
   }
 };
 
-// @desc    Get posts by tag
-// @route   GET /api/posts/tag/:tag
-// @access  Public
-const getPostsByTag = async (req, res) => {
-  try {
-    const posts = await BlogPost.find({
-      tags: req.params.tag,
-      isDraft: false,
-    }).populate("author", "name profileImageUrl");
-    res.json(posts);
-  } catch (err) {
-    res
-      .status(500)
-      .json({ message: "Failed to get post by tag", err: err.message });
-  }
-};
-
-// @desc    Search posts by title or content
-// @route   GET /api/posts/search?q=keyword
-// @access  Public
-const searchPosts = async (req, res) => {
-  try {
-    const q = req.query.q;
-    const posts = await BlogPost.find({
-      isDraft: false,
-      $or: [
-        { title: { $regex: q, $options: "i" } },
-        { content: { $regex: q, $options: "i" } },
-      ],
-    }).populate("author", "name profileImageUrl");
-    res.json(posts);
-  } catch (err) {
-    res.status(500).json({ message: "Server Error", err: err.message });
-  }
-};
-
-// @desc    Increment post view count
-// @route   PUT /api/posts/:id/view
-// @access  Public
 const incrementView = async (req, res) => {
   try {
-    await BlogPost.findByIdAndUpdate(req.params.id, { $inc: { views: 1 } });
+    const id = req.params.id;
+    await prisma.blogPost.update({
+      where: { id },
+      data: { views: { increment: 1 } },
+    });
     res.json({ message: "View count incremented" });
   } catch (err) {
+    console.error("incrementView:", err);
     res
       .status(500)
       .json({ message: "Failed to increment view count", err: err.message });
@@ -238,29 +226,34 @@ const incrementView = async (req, res) => {
 // @route   PUT /api/posts/:id/like
 // @access  Public
 const likePost = async (req, res) => {
-  const userId = req.user._id;
-  const postId = req.params.id;
-
   try {
-    const post = await BlogPost.findById(postId);
-    if (!post) return res.status(404).json({ message: "Post not found" });
+    const userId = req.user.id;
+    const postId = req.params.id;
 
-    // Check if user has already liked
-    if (post.likedBy.includes(userId)) {
-      return res
-        .status(200)
-        .json({ message: "Already liked", likes: post.likes });
-    }
+    // create PostLike if not exists (transaction)
+    const already = await prisma.postLike
+      .findUnique({ where: { userId_postId: { userId, postId } } })
+      .catch(() => null);
+    if (already) return res.status(200).json({ message: "Already liked" });
 
-    // Add user to likedBy and increment count
-    post.likedBy.push(userId);
-    post.likes += 1;
-    await post.save();
+    await prisma.$transaction([
+      prisma.postLike.create({
+        data: {
+          user: { connect: { id: userId } },
+          post: { connect: { id: postId } },
+        },
+      }),
+      prisma.blogPost.update({
+        where: { id: postId },
+        data: { likesCount: { increment: 1 } },
+      }),
+    ]);
 
-    return res.status(200).json({ message: "Like added", likes: post.likes });
+    const updated = await prisma.blogPost.findUnique({ where: { id: postId } });
+    res.json({ message: "Like added", likes: updated.likesCount });
   } catch (err) {
-    console.error("Error liking post:", err);
-    return res
+    console.error("likePost:", err);
+    res
       .status(500)
       .json({ message: "Failed to like post", error: err.message });
   }
@@ -271,15 +264,25 @@ const likePost = async (req, res) => {
 // @access  Private
 const getTopPosts = async (req, res) => {
   try {
-    const posts = await BlogPost.find({ isDraft: false })
-      .sort({ views: -1, likes: -1 })
-      .limit(5);
-
+    const posts = await prisma.blogPost.findMany({
+      where: { isDraft: false },
+      orderBy: [{ views: "desc" }, { likesCount: "desc" }],
+      take: 5,
+      select: {
+        id: true,
+        title: true,
+        coverImageUrl: true,
+        views: true,
+        likesCount: true,
+        slug: true,
+      },
+    });
     res.json(posts);
   } catch (err) {
+    console.error("getTopPosts:", err);
     res
       .status(500)
-      .json({ message: "Failed to get top post", err: err.message });
+      .json({ message: "Failed to get top posts", err: err.message });
   }
 };
 
@@ -289,8 +292,45 @@ module.exports = {
   deletePost,
   getAllPosts,
   getPostBySlug,
-  getPostsByTag,
-  searchPosts,
+  getPostsByTag: async (req, res) => {
+    try {
+      const tagName = req.params.tag;
+      const tag = await prisma.tag.findUnique({
+        where: { name: tagName },
+        include: { posts: true },
+      });
+      if (!tag) return res.json([]);
+      const posts = await prisma.blogPost.findMany({
+        where: { tags: { some: { id: tag.id } }, isDraft: false },
+        include: { author: true, tags: true },
+      });
+      res.json(posts);
+    } catch (err) {
+      console.error("getPostsByTag:", err);
+      res
+        .status(500)
+        .json({ message: "Failed to get posts by tag", err: err.message });
+    }
+  },
+  searchPosts: async (req, res) => {
+    try {
+      const q = req.query.q || "";
+      const posts = await prisma.blogPost.findMany({
+        where: {
+          isDraft: false,
+          OR: [
+            { title: { contains: q, mode: "insensitive" } },
+            { content: { contains: q, mode: "insensitive" } },
+          ],
+        },
+        include: { author: true },
+      });
+      res.json(posts);
+    } catch (err) {
+      console.error("searchPosts:", err);
+      res.status(500).json({ message: "Server Error", err: err.message });
+    }
+  },
   incrementView,
   likePost,
   getTopPosts,

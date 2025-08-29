@@ -7,19 +7,39 @@ const path = require("path");
 const helmet = require("helmet");
 const fs = require("fs");
 const mime = require("mime-types");
-const connectDB = require("./config/db");
 
-require("./jobs/emailJobs");
+const prisma = require("./config/prisma"); // ← Prisma client
+require("./jobs/emailJobs"); // Agenda job definitions that rely on MONGO_URL
 
 const agenda = require("./config/agenda");
-(async function () {
-  await agenda.start();
-  console.log("✅ Agenda scheduler started");
+
+const startAgenda = async () => {
+  try {
+    await agenda.start();
+    console.log("✅ Agenda scheduler started");
+  } catch (err) {
+    console.error("Failed to start Agenda:", err);
+  }
+};
+
+(async function init() {
+  // Connect Prisma early so connection issues show up at boot
+  try {
+    await prisma.$connect();
+    console.log("✅ Prisma connected to DATABASE_URL");
+  } catch (err) {
+    console.error("❌ Prisma connection error:", err);
+    // We don't exit here to allow Agenda jobs still to work (if that's desired).
+    // Optionally: process.exit(1);
+  }
+
+  // Start Agenda (it uses process.env.MONGO_URL)
+  await startAgenda();
 })();
 
 // ─── 1) Allowed origins ───────────────────────────────────────────────────────
 const allowedOrigins = [
-  "https://uaacainternational-api.onrender.com",
+  "https://uaacaiinternational-api-6zzt.onrender.com",
   "https://uaacaiinternational.org",
   "http://localhost:5173",
 ];
@@ -70,9 +90,9 @@ app.use(
   })
 );
 
-// ─── 7) Body parsing & DB connection ─────────────────────────────────────────
+// ─── 7) Body parsing (Prisma does not require a separate connect call) ───────
 app.use(express.json());
-connectDB(); // ← make sure your config/db.js logs success/failure
+// previously: connectDB(); // removed - Prisma handles DB connections
 
 // ─── 8) Mount your API routes ─────────────────────────────────────────────────
 app.use("/api/auth", require("./routes/authRoutes"));
@@ -88,20 +108,18 @@ app.options("/uploads/*path", cors(uploadCorsOptions));
 // ─── 10) Serve uploads with CORS + video/image cache logic ───────────────────
 app.use(
   "/uploads",
-  // you can keep cors() here for OPTIONS+regular GET:
   cors(uploadCorsOptions),
   express.static(uploadDir, {
     setHeaders: (res, filePath) => {
       const contentType = mime.lookup(filePath) || "";
 
-      // 1) Manually re‐add the ACAO header
+      // 1) Manually re‐add the ACAO header (echo origin when available)
       res.setHeader(
         "Access-Control-Allow-Origin",
-        // you could use '*' or better, echo back the request’s origin:
         res.req.headers.origin || allowedOrigins[0]
       );
 
-      // 2) Your cache headers:
+      // 2) Cache headers
       if (contentType.startsWith("video/")) {
         res.setHeader("Cache-Control", "public, max-age=3600");
       } else if (contentType.startsWith("image/")) {
@@ -135,6 +153,33 @@ app.use((err, req, res, next) => {
 
 // ─── 12) Start the server ─────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3002;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
+// ─── Graceful shutdown ────────────────────────────────────────────────────────
+async function shutdown(signal) {
+  try {
+    console.log(`\n🛑 Received ${signal}. Shutting down gracefully...`);
+    server.close(() => console.log("HTTP server closed."));
+    try {
+      await agenda.stop();
+      console.log("Agenda stopped.");
+    } catch (err) {
+      console.warn("Error stopping Agenda:", err);
+    }
+    try {
+      await prisma.$disconnect();
+      console.log("Prisma disconnected.");
+    } catch (err) {
+      console.warn("Error disconnecting Prisma:", err);
+    }
+    process.exit(0);
+  } catch (err) {
+    console.error("Shutdown error:", err);
+    process.exit(1);
+  }
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));

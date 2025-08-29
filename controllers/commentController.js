@@ -1,27 +1,33 @@
-const Comment = require("../models/Comment");
-const BlogPost = require("../models/BlogPost");
+// backend/controllers/commentController.js
+const prisma = require("../config/prisma");
 
+// @desc    Add a comment to a blog post
+// @route   POST /api/comments/:postId
+// @access  Private
 const addComment = async (req, res) => {
   try {
     const { postId } = req.params;
     const { content, parentComment } = req.body;
+    const authorId = req.user.id;
 
-    const post = await BlogPost.findById(postId);
-    if (!post) {
-      return res.status(404).json({ message: "Post not found" });
-    }
+    const post = await prisma.blogPost.findUnique({ where: { id: postId } });
+    if (!post) return res.status(404).json({ message: "Post not found" });
 
-    const comment = await Comment.create({
-      post: postId,
-      author: req.user._id,
-      content,
-      parentComment: parentComment || null,
+    const comment = await prisma.comment.create({
+      data: {
+        content,
+        post: { connect: { id: postId } },
+        author: { connect: { id: authorId } },
+        parentId: parentComment || null,
+      },
+      include: {
+        author: { select: { id: true, name: true, profileImageUrl: true } },
+      },
     });
-
-    await comment.populate("author", "name profileImageUrl");
 
     res.status(201).json(comment);
   } catch (err) {
+    console.error("addComment:", err);
     res
       .status(500)
       .json({ message: "Failed to add comment", err: err.message });
@@ -33,35 +39,34 @@ const addComment = async (req, res) => {
 // @access  Public
 const getAllComments = async (req, res) => {
   try {
-    const comments = await Comment.find()
-      .populate("author", "name profileImageUrl")
-      .populate("post", "title coverImageUrl")
-      .sort({ createdAt: 1 });
-
-    const commentMap = {};
-    comments.forEach((comment) => {
-      comment = comment.toObject();
-      comment.replies = [];
-      commentMap[comment._id] = comment;
+    const comments = await prisma.comment.findMany({
+      include: {
+        author: { select: { id: true, name: true, profileImageUrl: true } },
+        post: { select: { id: true, title: true, coverImageUrl: true } },
+      },
+      orderBy: { createdAt: "asc" },
     });
 
-    const nestedComments = [];
-    comments.forEach((comment) => {
-      if (comment.parentComment) {
-        const parent = commentMap[comment.parentComment];
-        if (parent) {
-          parent.replies.push(commentMap[comment._id]);
-        }
+    // Convert to nested structure
+    const map = {};
+    const list = comments.map((c) => ({ ...c, replies: [] }));
+    list.forEach((c) => (map[c.id] = c));
+    const root = [];
+    list.forEach((c) => {
+      if (c.parentId) {
+        const p = map[c.parentId];
+        if (p) p.replies.push(c);
       } else {
-        nestedComments.push(commentMap[comment._id]);
+        root.push(c);
       }
     });
 
-    res.json(nestedComments);
+    res.json(root);
   } catch (err) {
+    console.error("getAllComments:", err);
     res
       .status(500)
-      .json({ message: "Failed to fetch all comments", err: err.message });
+      .json({ message: "Failed to fetch comments", err: err.message });
   }
 };
 
@@ -70,34 +75,31 @@ const getAllComments = async (req, res) => {
 // @access  Public
 const getCommentsByPost = async (req, res) => {
   try {
-    const { postId } = req.params;
-
-    const comments = await Comment.find({ post: postId })
-      .populate("author", "name profileImageUrl")
-      .populate("post", "title coverImageUrl")
-      .sort({ createdAt: 1 });
-
-    const commentMap = {};
-    comments.forEach((comment) => {
-      comment = comment.toObject();
-      comment.replies = [];
-      commentMap[comment._id] = comment;
+    const postId = req.params.postId;
+    const comments = await prisma.comment.findMany({
+      where: { postId },
+      include: {
+        author: { select: { id: true, name: true, profileImageUrl: true } },
+      },
+      orderBy: { createdAt: "asc" },
     });
 
-    const nestedComments = [];
-    comments.forEach((comment) => {
-      if (comment.parentComment) {
-        const parent = commentMap[comment.parentComment];
-        if (parent) {
-          parent.replies.push(commentMap[comment._id]);
-        }
+    const map = {};
+    const list = comments.map((c) => ({ ...c, replies: [] }));
+    list.forEach((c) => (map[c.id] = c));
+    const root = [];
+    list.forEach((c) => {
+      if (c.parentId) {
+        const p = map[c.parentId];
+        if (p) p.replies.push(c);
       } else {
-        nestedComments.push(commentMap[comment._id]);
+        root.push(c);
       }
     });
 
-    res.json(nestedComments);
+    res.json(root);
   } catch (err) {
+    console.error("getCommentsByPost:", err);
     res
       .status(500)
       .json({ message: "Failed to fetch comments by post", err: err.message });
@@ -109,19 +111,14 @@ const getCommentsByPost = async (req, res) => {
 // @access  Private
 const deleteComment = async (req, res) => {
   try {
-    const { commentId } = req.params;
-
-    const comment = await Comment.findById(commentId);
-    if (!comment) {
-      return res.status(404).json({ message: "Comment not found" });
-    }
-
-    await Comment.deleteOne({ _id: commentId });
-
-    await Comment.deleteMany({ parentComment: commentId });
-
-    res.json({ message: "Comment and any replies deleted successfully" });
+    const commentId = req.params.commentId;
+    await prisma.$transaction([
+      prisma.comment.deleteMany({ where: { parentId: commentId } }),
+      prisma.comment.delete({ where: { id: commentId } }),
+    ]);
+    res.json({ message: "Comment and replies deleted" });
   } catch (err) {
+    console.error("deleteComment:", err);
     res
       .status(500)
       .json({ message: "Failed to delete comment", err: err.message });
