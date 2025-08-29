@@ -4,64 +4,32 @@ const slugify = require("slugify");
 const agenda = require("../config/agenda");
 
 /**
- * Helper: normalize a Prisma BlogPost object into the shape the frontend expects.
- * - Returns both `id` and `_id` for backward compatibility.
- * - Flattens postTags -> tags (array of tag names).
- * - Picks a primary cover image from coverImageUrl[] (or null).
- * - Serializes dates to ISO strings.
+ * Helper to map the Post with postTags -> tags array
  */
-function mapPostForClient(p) {
-  if (!p) return null;
+const mapPostResponse = (post) => {
+  const tags = (post.postTags || []).map((pt) => pt.tag?.name).filter(Boolean);
+  const { postTags, ...rest } = post;
+  return { ...rest, tags };
+};
 
-  const tags =
-    Array.isArray(p.postTags) && p.postTags.length
-      ? p.postTags.map((pt) => pt.tag && pt.tag.name).filter(Boolean)
-      : [];
+/**
+ * Helper to surface DB connectivity issues clearly
+ */
+const handlePrismaError = (res, err, fallbackMessage = "Server error") => {
+  console.error("Prisma error:", err);
+  if (err && err.code === "P1001") {
+    // Can't reach DB
+    return res
+      .status(503)
+      .json({
+        message: "Database unreachable. Please check DATABASE_URL and network.",
+        err: err.message,
+      });
+  }
+  return res.status(500).json({ message: fallbackMessage, err: err.message });
+};
 
-  const coverImageUrl =
-    Array.isArray(p.coverImageUrl) && p.coverImageUrl.length
-      ? p.coverImageUrl[0]
-      : typeof p.coverImageUrl === "string"
-        ? p.coverImageUrl
-        : null;
-
-  const coverVideoUrl =
-    Array.isArray(p.coverVideoUrl) && p.coverVideoUrl.length
-      ? p.coverVideoUrl[0]
-      : typeof p.coverVideoUrl === "string"
-        ? p.coverVideoUrl
-        : null;
-
-  return {
-    id: p.id,
-    _id: p.id, // keep for compatibility if frontend expects _id
-    title: p.title,
-    slug: p.slug,
-    content: p.content,
-    coverImageUrl,
-    coverImageUrls: Array.isArray(p.coverImageUrl) ? p.coverImageUrl : [],
-    coverVideoUrl,
-    coverVideoUrls: Array.isArray(p.coverVideoUrl) ? p.coverVideoUrl : [],
-    tags,
-    author: p.author
-      ? {
-          id: p.author.id,
-          name: p.author.name,
-          profileImageUrl: p.author.profileImageUrl || null,
-        }
-      : null,
-    views: p.views ?? 0,
-    likesCount: p.likesCount ?? 0,
-    generatedByAI: !!p.generatedByAI,
-    isDraft: !!p.isDraft,
-    createdAt: p.createdAt ? p.createdAt.toISOString() : null,
-    updatedAt: p.updatedAt ? p.updatedAt.toISOString() : null,
-  };
-}
-
-/* ========== Controllers ========== */
-
-// Create a new blog post
+// CREATE
 const createPost = async (req, res) => {
   try {
     const {
@@ -73,28 +41,14 @@ const createPost = async (req, res) => {
       isDraft = false,
       generatedByAI = false,
     } = req.body;
-
-    const authorId = req.user && req.user.id;
-    if (!authorId) return res.status(401).json({ message: "Unauthorized" });
+    const authorId = req.user.id;
 
     if (!title || !content)
       return res.status(400).json({ message: "Missing fields" });
 
     const slug = slugify(title, { lower: true, strict: true });
 
-    // Build postTags create payload: create PostTag entries with tag connectOrCreate
-    const postTagCreates = Array.isArray(tags)
-      ? tags.map((t) => ({
-          tag: {
-            connectOrCreate: {
-              where: { name: t },
-              create: { name: t },
-            },
-          },
-        }))
-      : [];
-
-    const post = await prisma.blogPost.create({
+    const created = await prisma.blogPost.create({
       data: {
         title,
         slug,
@@ -104,7 +58,16 @@ const createPost = async (req, res) => {
         isDraft,
         generatedByAI,
         author: { connect: { id: authorId } },
-        postTags: { create: postTagCreates },
+        postTags: {
+          create: tags.map((t) => ({
+            tag: {
+              connectOrCreate: {
+                where: { name: t },
+                create: { name: t },
+              },
+            },
+          })),
+        },
       },
       include: {
         author: { select: { id: true, name: true, profileImageUrl: true } },
@@ -112,7 +75,9 @@ const createPost = async (req, res) => {
       },
     });
 
-    // Notify subscribers (non-blocking behavior is acceptable but we await to catch errors)
+    const post = mapPostResponse(created);
+
+    // notify members (optional)
     try {
       const subscribers = await prisma.user.findMany({
         where: { role: "member" },
@@ -124,56 +89,58 @@ const createPost = async (req, res) => {
         postUrl: `${process.env.FRONTEND_URL}/posts/${post.slug}`,
       });
     } catch (notifyErr) {
-      console.error("createPost: subscribers notification failed:", notifyErr);
-      // proceed — don't fail the request because of notification issues
+      console.error("notify subscribers failed:", notifyErr);
+      // don't fail the request for notification errors
     }
 
-    res.status(201).json(mapPostForClient(post));
+    return res.status(201).json(post);
   } catch (err) {
-    console.error("createPost:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to create post", err: err.message || err });
+    return handlePrismaError(res, err, "Failed to create post");
   }
 };
 
-// Update an existing post
+// UPDATE
 const updatePost = async (req, res) => {
   try {
     const id = req.params.id;
     const payload = { ...req.body };
 
-    if (payload.title) {
+    if (payload.title)
       payload.slug = slugify(payload.title, { lower: true, strict: true });
-    }
 
-    // If tags are provided, remove existing postTags for this post and recreate
+    // If tags provided — replace them (simpler and predictable)
     if (payload.tags) {
-      const tags = Array.isArray(payload.tags) ? payload.tags : [];
+      const newTags = payload.tags;
       delete payload.tags;
 
-      // Transaction: delete old PostTags, update post fields, then create new PostTags
+      // ensure post exists
+      const exists = await prisma.blogPost.findUnique({ where: { id } });
+      if (!exists) return res.status(404).json({ message: "Post not found" });
+
+      // update scalars
+      await prisma.blogPost.update({
+        where: { id },
+        data: payload,
+      });
+
+      // replace postTags in a transaction
       await prisma.$transaction(async (tx) => {
         await tx.postTag.deleteMany({ where: { postId: id } });
 
-        // create new postTags
-        const postTagCreates = tags.map((t) => ({
-          tag: {
-            connectOrCreate: {
-              where: { name: t },
-              create: { name: t },
-            },
-          },
-        }));
+        for (const tagName of newTags) {
+          const tag = await tx.tag.upsert({
+            where: { name: tagName },
+            update: {},
+            create: { name: tagName },
+          });
 
-        // update fields and create new postTags
-        await tx.blogPost.update({
-          where: { id },
-          data: {
-            ...payload,
-            postTags: { create: postTagCreates },
-          },
-        });
+          await tx.postTag.create({
+            data: {
+              post: { connect: { id } },
+              tag: { connect: { id: tag.id } },
+            },
+          });
+        }
       });
 
       const updated = await prisma.blogPost.findUnique({
@@ -184,10 +151,10 @@ const updatePost = async (req, res) => {
         },
       });
 
-      return res.json(mapPostForClient(updated));
+      return res.json(mapPostResponse(updated));
     }
 
-    // No tags update path
+    // normal update (no tags)
     const updated = await prisma.blogPost.update({
       where: { id },
       data: payload,
@@ -197,33 +164,41 @@ const updatePost = async (req, res) => {
       },
     });
 
-    res.json(mapPostForClient(updated));
+    return res.json(mapPostResponse(updated));
   } catch (err) {
-    console.error("updatePost:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to update post", err: err.message || err });
+    if (err && err.code === "P2025") {
+      return res.status(404).json({ message: "Post not found" });
+    }
+    return handlePrismaError(res, err, "Failed to update post");
   }
 };
 
-// Delete a blog post
+// DELETE
 const deletePost = async (req, res) => {
   try {
     const id = req.params.id;
 
-    // cascade behavior: delete PostTag and PostLike entries if necessary via DB cascade or manual deletes.
-    // Attempt to delete post directly; Prisma will fail if there are FK constraints without cascade.
-    await prisma.blogPost.delete({ where: { id } });
-    res.json({ message: "Deleted" });
+    // Ensure post exists before deleting
+    const post = await prisma.blogPost.findUnique({ where: { id } });
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    await prisma.$transaction([
+      prisma.postTag.deleteMany({ where: { postId: id } }),
+      prisma.postLike.deleteMany({ where: { postId: id } }),
+      prisma.comment.deleteMany({ where: { postId: id } }),
+      prisma.blogPost.delete({ where: { id } }),
+    ]);
+
+    return res.json({ message: "Deleted" });
   } catch (err) {
-    console.error("deletePost:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to delete post", err: err.message || err });
+    if (err && err.code === "P2025") {
+      return res.status(404).json({ message: "Post not found" });
+    }
+    return handlePrismaError(res, err, "Failed to delete post");
   }
 };
 
-// Get blog posts by status (all, published, or draft) with counts
+// GET ALL (paginated)
 const getAllPosts = async (req, res) => {
   try {
     const status = req.query.status || "published";
@@ -256,57 +231,51 @@ const getAllPosts = async (req, res) => {
         prisma.blogPost.count({ where: { isDraft: true } }),
       ]);
 
-    const posts = postsRaw.map(mapPostForClient);
+    const posts = postsRaw.map(mapPostResponse);
 
-    res.json({
+    return res.json({
       posts,
       page,
-      totalPages: Math.max(1, Math.ceil(totalCount / limit)),
+      totalPages: Math.ceil(totalCount / limit),
       totalCount,
       counts: { all: allCount, published: publishedCount, draft: draftCount },
     });
   } catch (err) {
-    console.error("getAllPosts:", err);
-    res.status(500).json({ message: "Server Error", err: err.message || err });
+    return handlePrismaError(res, err, "Failed to fetch posts");
   }
 };
 
-// Get a single blog post by slug
+// GET BY SLUG
 const getPostBySlug = async (req, res) => {
   try {
     const slug = req.params.slug;
-    const post = await prisma.blogPost.findUnique({
+    const postRaw = await prisma.blogPost.findUnique({
       where: { slug },
       include: {
         author: { select: { id: true, name: true, profileImageUrl: true } },
         postTags: { include: { tag: true } },
-        comments: true,
-        likes: true,
       },
     });
-    if (!post) return res.status(404).json({ message: "Post not found" });
+    if (!postRaw) return res.status(404).json({ message: "Post not found" });
 
-    // determine if current user liked
     let hasLiked = false;
     if (req.user && req.user.id) {
       const like = await prisma.postLike
         .findUnique({
-          where: { userId_postId: { userId: req.user.id, postId: post.id } },
+          where: { userId_postId: { userId: req.user.id, postId: postRaw.id } },
         })
         .catch(() => null);
       hasLiked = !!like;
     }
 
-    res.json({ ...mapPostForClient(post), hasLiked });
+    const post = mapPostResponse(postRaw);
+    return res.json({ ...post, hasLiked });
   } catch (err) {
-    console.error("getPostBySlug:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to get post", err: err.message || err });
+    return handlePrismaError(res, err, "Failed to get post");
   }
 };
 
-// Increment view count
+// incrementView
 const incrementView = async (req, res) => {
   try {
     const id = req.params.id;
@@ -314,26 +283,18 @@ const incrementView = async (req, res) => {
       where: { id },
       data: { views: { increment: 1 } },
     });
-    res.json({ message: "View count incremented" });
+    return res.json({ message: "View count incremented" });
   } catch (err) {
-    console.error("incrementView:", err);
-    res
-      .status(500)
-      .json({
-        message: "Failed to increment view count",
-        err: err.message || err,
-      });
+    return handlePrismaError(res, err, "Failed to increment view");
   }
 };
 
-// Like a post
+// likePost
 const likePost = async (req, res) => {
   try {
-    const userId = req.user && req.user.id;
+    const userId = req.user.id;
     const postId = req.params.id;
-    if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    // create PostLike if not exists
     const already = await prisma.postLike
       .findUnique({ where: { userId_postId: { userId, postId } } })
       .catch(() => null);
@@ -352,24 +313,14 @@ const likePost = async (req, res) => {
       }),
     ]);
 
-    const updated = await prisma.blogPost.findUnique({
-      where: { id: postId },
-      select: { likesCount: true },
-    });
-
-    res.json({
-      message: "Like added",
-      likes: updated ? updated.likesCount : 0,
-    });
+    const updated = await prisma.blogPost.findUnique({ where: { id: postId } });
+    return res.json({ message: "Like added", likes: updated.likesCount });
   } catch (err) {
-    console.error("likePost:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to like post", error: err.message || err });
+    return handlePrismaError(res, err, "Failed to like post");
   }
 };
 
-// Get top trending posts
+// getTopPosts
 const getTopPosts = async (req, res) => {
   try {
     const postsRaw = await prisma.blogPost.findMany({
@@ -378,48 +329,32 @@ const getTopPosts = async (req, res) => {
       take: 5,
       include: { postTags: { include: { tag: true } } },
     });
-
-    const posts = postsRaw.map((p) => {
-      const m = mapPostForClient(p);
-      return {
-        id: m.id,
-        _id: m._id,
-        title: m.title,
-        slug: m.slug,
-        coverImageUrl: m.coverImageUrl,
-        tags: m.tags,
-        views: m.views,
-        likesCount: m.likesCount,
-      };
-    });
-
-    res.json(posts);
+    const posts = postsRaw.map(mapPostResponse).map((p) => ({
+      id: p.id,
+      title: p.title,
+      coverImageUrl: p.coverImageUrl,
+      views: p.views,
+      likesCount: p.likesCount,
+      slug: p.slug,
+      tags: p.tags,
+    }));
+    return res.json(posts);
   } catch (err) {
-    console.error("getTopPosts:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to get top posts", err: err.message || err });
+    return handlePrismaError(res, err, "Failed to get top posts");
   }
 };
 
-// Get posts by tag name
+// getPostsByTag
 const getPostsByTag = async (req, res) => {
   try {
     const tagName = req.params.tag;
-    if (!tagName) return res.json([]);
-
-    const tag = await prisma.tag.findUnique({
-      where: { name: tagName },
-      select: { id: true },
-    });
+    const tag = await prisma.tag.findUnique({ where: { name: tagName } });
     if (!tag) return res.json([]);
 
-    // Find postTag entries for this tag, include post (and post relations)
     const postTags = await prisma.postTag.findMany({
       where: { tagId: tag.id },
       include: {
         post: {
-          where: { isDraft: false },
           include: {
             author: { select: { id: true, name: true, profileImageUrl: true } },
             postTags: { include: { tag: true } },
@@ -428,27 +363,22 @@ const getPostsByTag = async (req, res) => {
       },
     });
 
-    // Extract posts (filter nulls) and map
     const posts = postTags
       .map((pt) => pt.post)
       .filter(Boolean)
-      // Remove duplicates (same post may appear multiple times)
-      .reduce((acc, curr) => {
-        if (!acc.some((p) => p.id === curr.id)) acc.push(curr);
+      .reduce((acc, p) => {
+        if (!acc.find((x) => x.id === p.id)) acc.push(p);
         return acc;
       }, [])
-      .map(mapPostForClient);
+      .map(mapPostResponse);
 
-    res.json(posts);
+    return res.json(posts);
   } catch (err) {
-    console.error("getPostsByTag:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to get posts by tag", err: err.message || err });
+    return handlePrismaError(res, err, "Failed to get posts by tag");
   }
 };
 
-// Search posts
+// searchPosts
 const searchPosts = async (req, res) => {
   try {
     const q = req.query.q || "";
@@ -466,11 +396,10 @@ const searchPosts = async (req, res) => {
       },
     });
 
-    const posts = postsRaw.map(mapPostForClient);
-    res.json(posts);
+    const posts = postsRaw.map(mapPostResponse);
+    return res.json(posts);
   } catch (err) {
-    console.error("searchPosts:", err);
-    res.status(500).json({ message: "Server Error", err: err.message || err });
+    return handlePrismaError(res, err, "Failed to search posts");
   }
 };
 

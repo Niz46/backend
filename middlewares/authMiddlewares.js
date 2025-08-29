@@ -1,12 +1,12 @@
-// backend/middleware/auth.js or wherever protect is defined
+// backend/middleware/authMiddleware.js
 const jwt = require("jsonwebtoken");
 const prisma = require("../config/prisma");
 
 const protect = async (req, res, next) => {
   try {
-    let token = req.headers.authorization;
+    let token = req.headers.authorization || "";
 
-    if (token && token.startsWith("Bearer")) {
+    if (token && token.startsWith("Bearer ")) {
       token = token.split(" ")[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
@@ -21,19 +21,17 @@ const protect = async (req, res, next) => {
         },
       });
 
-      if (!user)
-        return res
-          .status(401)
-          .json({ message: "Not authorized: user not found" });
+      if (!user) return res.status(401).json({ message: "Not authorized" });
 
       req.user = user;
       return next();
-    } else {
-      return res.status(401).json({ message: "Not authorized, no token" });
     }
+
+    return res.status(401).json({ message: "Not authorized, no token" });
   } catch (err) {
-    console.error("protect:", err);
+    console.error("protect middleware:", err);
     return res.status(401).json({ message: "Token failed", err: err.message });
   }
 };
+
 module.exports = { protect };
