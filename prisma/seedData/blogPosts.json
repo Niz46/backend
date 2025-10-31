@@ -2,7 +2,7 @@
   {
     "title": "Justice Reform: Practical Steps for Community Advocacy",
     "content": "Justice reform needs both data-driven policy and community engagement. In this post we outline three practical steps organisations can take to build local advocacy coalitions, collect meaningful evidence, and engage policymakers effectively.\n\n1. Map stakeholders\n2. Collect and present data\n3. Use storytelling to drive policy change\n\nReferences: UAACAI research series, 2024.",
-    "coverImageUrl": ["/images/1.jpg", "/images/2.jpg"],
+    "coverImageUrl": ["/1.jpg", "/2.jpg"],
     "coverVideoUrl": [],
     "isDraft": false,
     "generatedByAI": false,
@@ -12,8 +12,8 @@
   {
     "title": "How to Run Impactful Community Events (Checklist & Toolkit)",
     "content": "Events are powerful ways to mobilise stakeholders. This article includes a practical checklist, budgeting tips, and a sample promotional timeline. Whether you're running a webinar or an in-person forum, follow these steps to increase turnout and measurable impact.",
-    "coverImageUrl": ["/images/8.jpg", "/images/6.jpg"],
-    "coverVideoUrl": ["/images/2.mp4"],
+    "coverImageUrl": ["/8.jpg", "/6.jpg"],
+    "coverVideoUrl": ["/2.mp4"],
     "isDraft": false,
     "generatedByAI": false,
     "authorEmail": "enquiry@uaacaiinternational.org",
@@ -22,7 +22,7 @@
   {
     "title": "Using Data to Make the Case for Reform — A Practical Primer",
     "content": "Data is an essential part of policy advocacy. This primer explains which indicators matter, how to visualise them clearly for decision-makers, and how to avoid common pitfalls in sampling and inference.",
-    "coverImageUrl": ["/images/3.jpg", "/images/4.jpg"],
+    "coverImageUrl": ["/3.jpg", "/4.jpg"],
     "coverVideoUrl": [],
     "isDraft": true,
     "generatedByAI": false,
