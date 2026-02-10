@@ -33,31 +33,93 @@ const createPost = async (req, res) => {
     const {
       title,
       content,
-      coverImageUrl = [],
-      coverVideoUrl = [],
       tags = [],
       isDraft = false,
       generatedByAI = false,
     } = req.body;
     const authorId = req.user.id;
 
-    if (!title || !content)
+    if (!title || !content) {
       return res.status(400).json({ message: "Missing fields" });
+    }
 
-    const slug = slugify(title, { lower: true, strict: true });
+    // --- helpers to normalize incoming fields ---
+    const normalizeArray = (val) => {
+      if (!val) return [];
+      if (Array.isArray(val)) return val;
+      // if client sent JSON stringified array
+      try {
+        const parsed = JSON.parse(val);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        // not JSON — fall back to string handling below
+      }
+      return [String(val)];
+    };
+
+    const normalizeTags = (val) => {
+      // Accepts: array, JSON stringified array, comma-separated string, or single string
+      if (!val) return [];
+      if (Array.isArray(val)) {
+        return val.map((t) => String(t).trim()).filter(Boolean);
+      }
+      if (typeof val === "string") {
+        const raw = val.trim();
+        // try JSON parse first
+        if (/^\[.*\]$/.test(raw)) {
+          try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              return parsed.map((t) => String(t).trim()).filter(Boolean);
+            }
+          } catch (e) {
+            // ignore and fallback to comma split
+          }
+        }
+        // fallback: comma separated list
+        return raw
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean);
+      }
+      // otherwise coerce
+      return [String(val).trim()].filter(Boolean);
+    };
+
+    // Normalize incoming cover arrays (middleware may already have attached arrays of Cloudinary URLs)
+    const coverImageUrl = normalizeArray(req.body.coverImageUrl);
+    const coverVideoUrl = normalizeArray(req.body.coverVideoUrl);
+
+    // Normalize tags (ensures array of trimmed strings)
+    const finalTags = normalizeTags(tags);
+
+    // Create a unique slug for the title. If slug exists, append a short suffix.
+    const baseSlug = slugify(title, { lower: true, strict: true });
+    let slug = baseSlug;
+    // Ensure slug uniqueness (simple loop with timestamp suffix if needed)
+    // Note: small race condition possible in highly concurrent writes — acceptable for most apps.
+    let suffixCounter = 0;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const existing = await prisma.blogPost.findUnique({ where: { slug } });
+      if (!existing) break;
+      suffixCounter += 1;
+      // include a time-based part to minimize collisions
+      slug = `${baseSlug}-${Date.now().toString(36)}-${suffixCounter}`;
+    }
 
     const created = await prisma.blogPost.create({
       data: {
         title,
         slug,
         content,
-        coverImageUrl,
-        coverVideoUrl,
-        isDraft,
-        generatedByAI,
+        coverImageUrl, // already normalized array
+        coverVideoUrl, // already normalized array
+        isDraft: Boolean(isDraft),
+        generatedByAI: Boolean(generatedByAI),
         author: { connect: { id: authorId } },
         postTags: {
-          create: tags.map((t) => ({
+          create: finalTags.map((t) => ({
             tag: {
               connectOrCreate: {
                 where: { name: t },
@@ -75,7 +137,7 @@ const createPost = async (req, res) => {
 
     const post = mapPostResponse(created);
 
-    // notify members (optional)
+    // notify members (optional) — don't fail create if notify fails
     try {
       const subscribers = await prisma.user.findMany({
         where: { role: "member" },
@@ -88,7 +150,7 @@ const createPost = async (req, res) => {
       });
     } catch (notifyErr) {
       console.error("notify subscribers failed:", notifyErr);
-      // don't fail the request for notification errors
+      // intentionally swallow notification errors
     }
 
     return res.status(201).json(post);

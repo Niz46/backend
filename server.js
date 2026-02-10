@@ -42,7 +42,7 @@ async function connectPrismaWithRetry() {
     } catch (err) {
       const wait = baseDelay * Math.pow(2, attempt - 1);
       console.warn(
-        `Prisma connect attempt ${attempt}/${maxRetries} failed: ${err.message}. retrying in ${wait}ms`
+        `Prisma connect attempt ${attempt}/${maxRetries} failed: ${err.message}. retrying in ${wait}ms`,
       );
       if (attempt === maxRetries) {
         console.error("❌ Prisma connection error: exhausted retries", err);
@@ -98,7 +98,7 @@ app.use(
       frameAncestors: ["'none'"],
       objectSrc: ["'none'"],
     },
-  })
+  }),
 );
 
 // ─── 5) Ensure uploads directory exists ────────────────────────────────────────
@@ -114,7 +114,7 @@ app.use(
     origin: allowedOrigins,
     methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-  })
+  }),
 );
 
 // ─── 7) Body parsing (Prisma does not require a separate connect call) ───────
@@ -132,36 +132,36 @@ app.use("/api/users", require("./routes/userRoutes"));
 app.options("/uploads/*path", cors(uploadCorsOptions));
 
 // ─── 10) Serve uploads with CORS + video/image cache logic ───────────────────
-app.use(
-  "/uploads",
-  cors(uploadCorsOptions),
-  express.static(uploadDir, {
-    setHeaders: (res, filePath) => {
-      const contentType = mime.lookup(filePath) || "";
+// app.use(
+//   "/uploads",
+//   cors(uploadCorsOptions),
+//   express.static(uploadDir, {
+//     setHeaders: (res, filePath) => {
+//       const contentType = mime.lookup(filePath) || "";
 
-      // 1) Manually re‐add the ACAO header (echo origin when available)
-      res.setHeader(
-        "Access-Control-Allow-Origin",
-        res.req.headers.origin || allowedOrigins[0]
-      );
+//       // 1) Manually re‐add the ACAO header (echo origin when available)
+//       res.setHeader(
+//         "Access-Control-Allow-Origin",
+//         res.req.headers.origin || allowedOrigins[0]
+//       );
 
-      // 2) Cache headers
-      if (contentType.startsWith("video/")) {
-        res.setHeader("Cache-Control", "public, max-age=3600");
-      } else if (contentType.startsWith("image/")) {
-        res.setHeader("Cache-Control", "public, max-age=86400");
-      } else {
-        res.setHeader("Cache-Control", "public, max-age=3600");
-      }
+//       // 2) Cache headers
+//       if (contentType.startsWith("video/")) {
+//         res.setHeader("Cache-Control", "public, max-age=3600");
+//       } else if (contentType.startsWith("image/")) {
+//         res.setHeader("Cache-Control", "public, max-age=86400");
+//       } else {
+//         res.setHeader("Cache-Control", "public, max-age=3600");
+//       }
 
-      // 3) Expose range headers
-      res.setHeader(
-        "Access-Control-Expose-Headers",
-        uploadCorsOptions.exposedHeaders.join(",")
-      );
-    },
-  })
-);
+//       // 3) Expose range headers
+//       res.setHeader(
+//         "Access-Control-Expose-Headers",
+//         uploadCorsOptions.exposedHeaders.join(",")
+//       );
+//     },
+//   })
+// );
 
 // ─── 11) Root, 404 & error handlers ────────────────────────────────────────────
 app.get("/", (req, res) => {
