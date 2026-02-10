@@ -19,12 +19,10 @@ const handlePrismaError = (res, err, fallbackMessage = "Server error") => {
   console.error("Prisma error:", err);
   if (err && err.code === "P1001") {
     // Can't reach DB
-    return res
-      .status(503)
-      .json({
-        message: "Database unreachable. Please check DATABASE_URL and network.",
-        err: err.message,
-      });
+    return res.status(503).json({
+      message: "Database unreachable. Please check DATABASE_URL and network.",
+      err: err.message,
+    });
   }
   return res.status(500).json({ message: fallbackMessage, err: err.message });
 };
@@ -277,15 +275,47 @@ const getPostBySlug = async (req, res) => {
 
 // incrementView
 const incrementView = async (req, res) => {
+  const param = req.params.id;
+  if (!param) {
+    return res.status(400).json({ message: "Missing post id or slug in URL" });
+  }
+
   try {
-    const id = req.params.id;
-    await prisma.blogPost.update({
-      where: { id },
+    // Try to find by primary id first
+    let post = null;
+    try {
+      post = await prisma.blogPost.findUnique({ where: { id: param } });
+    } catch (e) {
+      // If id param is not the right type for id column (e.g. numeric vs uuid),
+      // ignore and try slug below.
+      post = null;
+    }
+
+    // If not found by id, try searching by slug
+    if (!post) {
+      post = await prisma.blogPost.findUnique({ where: { slug: param } });
+    }
+
+    if (!post) {
+      // clear, explicit 404 — do NOT call update() with a missing id
+      return res.status(404).json({
+        message: "Post not found for id or slug",
+        lookedUp: param,
+      });
+    }
+
+    // Perform atomic increment
+    const updated = await prisma.blogPost.update({
+      where: { id: post.id },
       data: { views: { increment: 1 } },
     });
-    return res.json({ message: "View count incremented" });
+
+    return res.json({ message: "View incremented", views: updated.views });
   } catch (err) {
-    return handlePrismaError(res, err, "Failed to increment view");
+    console.error("Failed to increment view:", err);
+    return res
+      .status(500)
+      .json({ message: "Failed to increment view", err: String(err) });
   }
 };
 

@@ -1,25 +1,68 @@
 // prisma/seed.js
+/**
+ * Complete seed script (JavaScript)
+ *
+ * Purpose:
+ *  - Preserve existing scalar-list (string[]) columns unless seed JSON explicitly provides values.
+ *  - Use correct Prisma update syntax for scalar lists: { set: [...] }.
+ *  - Defensive checks + helpful logging to avoid accidental overwrites.
+ *
+ * Usage:
+ *  1. npx prisma generate
+ *  2. node prisma/seed.js
+ *
+ * Notes:
+ *  - This script expects a JSON file at prisma/seedData/blogPosts.json (array of post objects).
+ *  - Your Prisma client is expected to be exported from ../config/prisma (as in your repo).
+ */
+
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const slugify = require("slugify");
-const prisma = require("../config/prisma"); // your project's prisma client
+const prisma = require("../config/prisma"); // adjust if your path differs
 
 const BLOG_POSTS_PATH = path.join(__dirname, "seedData", "blogPosts.json");
+
+/* ---------- Helpers ---------- */
+
+function ensureArray(val) {
+  if (val === undefined || val === null) return undefined;
+  if (Array.isArray(val)) return val;
+  if (typeof val === "string") return [val];
+  // if it's something else, don't coerce — return undefined so we won't touch DB
+  return undefined;
+}
 
 async function loadPostsJson() {
   if (!fs.existsSync(BLOG_POSTS_PATH)) {
     throw new Error(`Missing ${BLOG_POSTS_PATH}. Create it with sample posts.`);
   }
   const raw = fs.readFileSync(BLOG_POSTS_PATH, "utf-8");
-  return JSON.parse(raw);
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Failed to parse ${BLOG_POSTS_PATH}: ${err.message}`);
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${BLOG_POSTS_PATH} must be a JSON array.`);
+  }
+  // Minimal validation for expected fields
+  return parsed.map((p, i) => {
+    if (!p.title || typeof p.title !== "string") {
+      throw new Error(`post at index ${i} is missing a valid 'title' field`);
+    }
+    // ensure tags is an array if present
+    if (p.tags && !Array.isArray(p.tags)) {
+      throw new Error(`post at index ${i} has invalid 'tags' (must be an array)`);
+    }
+    return p;
+  });
 }
 
 async function findOrCreateAuthor(email) {
-  if (!email) {
-    // fallback author if JSON lacks authorEmail
-    email = "seed-author@uaacai.org";
-  }
+  if (!email) email = "seed-author@uaacai.org";
 
   let user = await prisma.user.findUnique({ where: { email } });
   if (user) return user;
@@ -29,7 +72,7 @@ async function findOrCreateAuthor(email) {
     data: {
       name: email.split("@")[0],
       email,
-      password: "seed-password", // NOTE: plaintext for seed; hash in production if needed
+      password: "seed-password", // plaintext for seed; replace or hash in real envs
       role: "member",
     },
   });
@@ -37,33 +80,60 @@ async function findOrCreateAuthor(email) {
 }
 
 /**
- * Upsert a post inside an interactive transaction.
- * Note: tagIds should be pre-computed and passed in (so we don't upsert tags inside the tx).
+ * Upsert a BlogPost within a transaction (tx).
+ * - If postObj.coverImageUrl / coverVideoUrl are provided (arrays), we WILL set them using { set: [...] }.
+ * - If they are omitted, we do NOT touch those DB columns during update (preserves existing images).
  */
 async function upsertPost(tx, postObj, authorId, tagIds = []) {
   const slug = slugify(postObj.title, { lower: true, strict: true });
 
+  const coverImages = ensureArray(postObj.coverImageUrl);
+  const coverVideos = ensureArray(postObj.coverVideoUrl);
+
+  // Build update object carefully: only include list updates when explicitly provided
+  const updateData = {
+    title: postObj.title,
+    content: postObj.content,
+    isDraft: Boolean(postObj.isDraft),
+    generatedByAI: Boolean(postObj.generatedByAI),
+    authorId: authorId,
+    // other scalar fields you want to update can be added here
+  };
+  if (coverImages !== undefined) {
+    // Prisma requires { set: [...] } when updating scalar lists
+    updateData.coverImageUrl = { set: coverImages };
+  }
+  if (coverVideos !== undefined) {
+    updateData.coverVideoUrl = { set: coverVideos };
+  }
+
+  const createData = {
+    title: postObj.title,
+    slug,
+    content: postObj.content,
+    coverImageUrl: coverImages ?? [],
+    coverVideoUrl: coverVideos ?? [],
+    isDraft: Boolean(postObj.isDraft),
+    generatedByAI: Boolean(postObj.generatedByAI),
+    author: { connect: { id: authorId } },
+  };
+
+  console.log(`🔁 Upserting post slug="${slug}" (authorId=${authorId})`);
+  if (coverImages !== undefined) {
+    console.log(`   coverImageUrl -> will be set to: ${JSON.stringify(coverImages)}`);
+  } else {
+    console.log(`   coverImageUrl -> NOT provided in JSON; will not be changed on update.`);
+  }
+  if (coverVideos !== undefined) {
+    console.log(`   coverVideoUrl -> will be set to: ${JSON.stringify(coverVideos)}`);
+  } else {
+    console.log(`   coverVideoUrl -> NOT provided in JSON; will not be changed on update.`);
+  }
+
   const upserted = await tx.blogPost.upsert({
     where: { slug },
-    update: {
-      title: postObj.title,
-      content: postObj.content,
-      coverImageUrl: postObj.coverImageUrl || [],
-      coverVideoUrl: postObj.coverVideoUrl || [],
-      isDraft: Boolean(postObj.isDraft),
-      generatedByAI: Boolean(postObj.generatedByAI),
-      authorId: authorId,
-    },
-    create: {
-      title: postObj.title,
-      slug,
-      content: postObj.content,
-      coverImageUrl: postObj.coverImageUrl || [],
-      coverVideoUrl: postObj.coverVideoUrl || [],
-      isDraft: Boolean(postObj.isDraft),
-      generatedByAI: Boolean(postObj.generatedByAI),
-      author: { connect: { id: authorId } },
-    },
+    update: updateData,
+    create: createData,
   });
 
   // Replace postTags deterministically: delete existing and bulk-insert new ones.
@@ -71,12 +141,13 @@ async function upsertPost(tx, postObj, authorId, tagIds = []) {
 
   if (Array.isArray(tagIds) && tagIds.length > 0) {
     const data = tagIds.map((tid) => ({ postId: upserted.id, tagId: tid }));
-    // createMany + skipDuplicates reduces round-trips and avoids duplicate-key failures
     await tx.postTag.createMany({ data, skipDuplicates: true });
   }
 
   return upserted;
 }
+
+/* ---------- Main seeding flow ---------- */
 
 async function seed() {
   console.log("🔁 Starting blog posts seeding...");
@@ -133,9 +204,7 @@ async function seed() {
         }
       );
 
-      console.log(
-        `  ➕ Upserted post: "${result.title}" (slug: ${result.slug})`
-      );
+      console.log(`  ➕ Upserted post: "${result.title}" (slug: ${result.slug})`);
     }
 
     console.log("🎉 Blog posts seeding completed.");

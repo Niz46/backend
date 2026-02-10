@@ -1,19 +1,30 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "UAACAI backend",
   "main": "server.js",
+  "type": "commonjs",
   "scripts": {
+    "build": "rimraf dist && npx tsc",
+    "start": "node server.js",
+    "start:prod": "npm run build && node dist/server.js",
+    "dev": "nodemon server.js",
+    "dev:ts": "concurrently \"npx tsc -w\" \"nodemon --exec ts-node src/index.ts\"",
+    "seed": "node prisma/seed.js",
+    "seed:ts": "ts-node prisma/seed.ts",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "postprisma:generate": "shx cp -r node_modules/.prisma/client/index.d.ts ../client/src/types/prismaTypes.d.ts",
+    "lint": "eslint . --ext .js,.ts",
+    "test": "echo \"no tests yet\" && exit 0"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
+    "@prisma/client": "^6.19.2",
     "@google/genai": "^1.8.0",
     "agenda": "^5.0.0",
     "bcryptjs": "^3.0.2",
@@ -28,10 +39,13 @@
     "slugify": "^1.6.6"
   },
   "devDependencies": {
-    "@prisma/client": "^6.18.0",
-    "i": "^0.3.7",
-    "nodemon": "^3.1.10",
-    "npm": "^11.6.0",
-    "prisma": "^6.18.0"
+    "prisma": "^6.19.2",
+    "concurrently": "^8.2.2",
+    "eslint": "^8.57.1",
+    "nodemon": "^3.1.11",
+    "rimraf": "^5.0.10",
+    "shx": "^0.3.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }

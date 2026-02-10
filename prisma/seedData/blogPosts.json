@@ -6,27 +6,7 @@
     "coverVideoUrl": [],
     "isDraft": false,
     "generatedByAI": false,
-    "authorEmail": "enquiry@uaacaiinternational.org",
+    "authorEmail": "admin.uaacainternational@gmail.com",
     "tags": ["policy", "justice"]
-  },
-  {
-    "title": "How to Run Impactful Community Events (Checklist & Toolkit)",
-    "content": "Events are powerful ways to mobilise stakeholders. This article includes a practical checklist, budgeting tips, and a sample promotional timeline. Whether you're running a webinar or an in-person forum, follow these steps to increase turnout and measurable impact.",
-    "coverImageUrl": ["/8.jpg", "/6.jpg"],
-    "coverVideoUrl": ["/2.mp4"],
-    "isDraft": false,
-    "generatedByAI": false,
-    "authorEmail": "enquiry@uaacaiinternational.org",
-    "tags": ["events", "research"]
-  },
-  {
-    "title": "Using Data to Make the Case for Reform — A Practical Primer",
-    "content": "Data is an essential part of policy advocacy. This primer explains which indicators matter, how to visualise them clearly for decision-makers, and how to avoid common pitfalls in sampling and inference.",
-    "coverImageUrl": ["/3.jpg", "/4.jpg"],
-    "coverVideoUrl": [],
-    "isDraft": true,
-    "generatedByAI": false,
-    "authorEmail": "enquiry@uaacaiinternational.org",
-    "tags": ["data", "research"]
   }
 ]
