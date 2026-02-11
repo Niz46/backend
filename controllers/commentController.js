@@ -10,16 +10,35 @@ const addComment = async (req, res) => {
     const { content, parentComment } = req.body;
     const authorId = req.user.id;
 
-    const post = await prisma.blogPost.findUnique({ where: { id: postId } });
+    // Basic validation
+    if (!content || !content.trim()) {
+      return res.status(400).json({ message: "Comment content is required" });
+    }
+
+    // Resolve post by id OR slug (robust to frontend using either)
+    const post = await prisma.blogPost.findFirst({
+      where: {
+        OR: [{ id: postId }, { slug: postId }],
+      },
+      select: { id: true },
+    });
+
     if (!post) return res.status(404).json({ message: "Post not found" });
 
+    // Build create payload using relation inputs (Prisma expects nested 'parent' relation)
+    const createData = {
+      content: content.trim(),
+      post: { connect: { id: post.id } },
+      author: { connect: { id: authorId } },
+    };
+
+    // If there's a parentComment id provided, connect using the relation 'parent'
+    if (parentComment) {
+      createData.parent = { connect: { id: parentComment } };
+    }
+
     const comment = await prisma.comment.create({
-      data: {
-        content,
-        post: { connect: { id: postId } },
-        author: { connect: { id: authorId } },
-        parentId: parentComment || null,
-      },
+      data: createData,
       include: {
         author: { select: { id: true, name: true, profileImageUrl: true } },
       },
@@ -42,7 +61,9 @@ const getAllComments = async (req, res) => {
     const comments = await prisma.comment.findMany({
       include: {
         author: { select: { id: true, name: true, profileImageUrl: true } },
-        post: { select: { id: true, title: true, coverImageUrl: true } },
+        post: {
+          select: { id: true, title: true, coverImageUrl: true, slug: true },
+        },
       },
       orderBy: { createdAt: "asc" },
     });
@@ -75,9 +96,19 @@ const getAllComments = async (req, res) => {
 // @access  Public
 const getCommentsByPost = async (req, res) => {
   try {
-    const postId = req.params.postId;
+    const postParam = req.params.postId;
+
+    // Resolve post by id || slug
+    const post = await prisma.blogPost.findFirst({
+      where: { OR: [{ id: postParam }, { slug: postParam }] },
+      select: { id: true },
+    });
+
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    // Now query comments by the resolved post.id
     const comments = await prisma.comment.findMany({
-      where: { postId },
+      where: { postId: post.id },
       include: {
         author: { select: { id: true, name: true, profileImageUrl: true } },
       },

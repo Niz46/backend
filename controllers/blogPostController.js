@@ -493,31 +493,74 @@ const incrementView = async (req, res) => {
 // likePost
 const likePost = async (req, res) => {
   try {
+    const postParam = req.params.id;
     const userId = req.user.id;
-    const postId = req.params.id;
 
-    const already = await prisma.postLike
-      .findUnique({ where: { userId_postId: { userId, postId } } })
-      .catch(() => null);
-    if (already) return res.status(200).json({ message: "Already liked" });
+    // Resolve post by id or slug
+    const post = await prisma.blogPost.findFirst({
+      where: { OR: [{ id: postParam }, { slug: postParam }] },
+      select: { id: true, likesCount: true },
+    });
 
-    await prisma.$transaction([
-      prisma.postLike.create({
-        data: {
-          user: { connect: { id: userId } },
-          post: { connect: { id: postId } },
-        },
-      }),
-      prisma.blogPost.update({
-        where: { id: postId },
-        data: { likesCount: { increment: 1 } },
-      }),
-    ]);
+    if (!post) return res.status(404).json({ message: "Post not found" });
 
-    const updated = await prisma.blogPost.findUnique({ where: { id: postId } });
-    return res.json({ message: "Like added", likes: updated.likesCount });
+    // Check if this user already liked this post
+    const existing = await prisma.postLike.findFirst({
+      where: { userId, postId: post.id },
+    });
+
+    if (existing) {
+      // Already liked — return current likes count
+      return res.status(200).json({
+        message: "Already liked",
+        likes: post.likesCount,
+        hasLiked: true,
+      });
+    }
+
+    // Create like + increment post likesCount in a transaction
+    try {
+      await prisma.$transaction([
+        prisma.postLike.create({
+          data: {
+            user: { connect: { id: userId } },
+            post: { connect: { id: post.id } },
+          },
+        }),
+        prisma.blogPost.update({
+          where: { id: post.id },
+          data: { likesCount: { increment: 1 } },
+        }),
+      ]);
+
+      const updated = await prisma.blogPost.findUnique({
+        where: { id: post.id },
+        select: { likesCount: true },
+      });
+
+      return res.status(201).json({
+        message: "Like added",
+        likes: updated?.likesCount ?? null,
+        hasLiked: true,
+      });
+    } catch (txErr) {
+      // Handle unique constraint race where like was inserted by another request
+      if (txErr?.code === "P2002") {
+        const updated = await prisma.blogPost.findUnique({
+          where: { id: post.id },
+          select: { likesCount: true },
+        });
+        return res.status(200).json({
+          message: "Already liked",
+          likes: updated?.likesCount ?? post.likesCount,
+          hasLiked: true,
+        });
+      }
+      throw txErr;
+    }
   } catch (err) {
-    return handlePrismaError(res, err, "Failed to like post");
+    console.error("Error in likePost:", err);
+    res.status(500).json({ message: "Failed to like post", err: err.message });
   }
 };
 
