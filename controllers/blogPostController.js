@@ -334,17 +334,28 @@ const updatePost = async (req, res) => {
 // DELETE
 const deletePost = async (req, res) => {
   try {
-    const id = req.params.id;
+    const param = req.params.id;
 
-    // Ensure post exists before deleting
-    const post = await prisma.blogPost.findUnique({ where: { id } });
+    // Try find by id first
+    let post = null;
+    try {
+      post = await prisma.blogPost.findUnique({ where: { id: param } });
+    } catch (e) {
+      post = null;
+    }
+
+    // If not found by id, try slug
+    if (!post) {
+      post = await prisma.blogPost.findUnique({ where: { slug: param } });
+    }
+
     if (!post) return res.status(404).json({ message: "Post not found" });
 
     await prisma.$transaction([
-      prisma.postTag.deleteMany({ where: { postId: id } }),
-      prisma.postLike.deleteMany({ where: { postId: id } }),
-      prisma.comment.deleteMany({ where: { postId: id } }),
-      prisma.blogPost.delete({ where: { id } }),
+      prisma.postTag.deleteMany({ where: { postId: post.id } }),
+      prisma.postLike.deleteMany({ where: { postId: post.id } }),
+      prisma.comment.deleteMany({ where: { postId: post.id } }),
+      prisma.blogPost.delete({ where: { id: post.id } }),
     ]);
 
     return res.json({ message: "Deleted" });
