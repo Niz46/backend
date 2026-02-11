@@ -113,9 +113,8 @@ router.post(
 // Public profile-image upload (no auth). Intended for user profile pictures (small files).
 router.post(
   "/upload-images-public",
-  // multer memory parser: accepts up to 3 files in field "images"
-  upload.array("images", 3),
-  // upload to Cloudinary in a dedicated folder for profile images
+  // accept any file field name; uploadToCloudinary will classify by mimetype
+  upload.any(),
   uploadToCloudinary({
     imagesKey: "images",
     folder: "blog_app/profile_images",
@@ -124,7 +123,6 @@ router.post(
     const urls = Array.isArray(req.body.coverImageUrl)
       ? req.body.coverImageUrl
       : [];
-    // require cloud uploads only; do not fallback to local files
     if (!urls.length) {
       return res
         .status(400)
@@ -137,7 +135,7 @@ router.post(
 
 router.post(
   "/upload-videos-public",
-  upload.array("videos", 3),
+  upload.any(),
   uploadToCloudinary({
     videosKey: "videos",
     folder: "blog_app/profile_videos",

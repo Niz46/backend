@@ -20,24 +20,29 @@ const VIDEO_MIMETYPES = [
 ];
 
 /**
- * fileFilter: allow image files for field "images", and video files for field "videos".
- * If client sends wrong type we reject it early.
+ * fileFilter: accept image files (image/*) and video files (video/*).
+ * We classify by mimetype instead of strict fieldname so the server is resilient
+ * to small client-side naming differences ("images", "images[]", "0", etc.).
  */
 const fileFilter = (req, file, cb) => {
-  const { fieldname, mimetype } = file;
+  const { mimetype } = file;
 
-  if (fieldname === "images") {
+  if (typeof mimetype !== "string") {
+    return cb(new Error(`Invalid file type: ${mimetype}`), false);
+  }
+
+  if (mimetype.startsWith("image/")) {
     if (IMAGE_MIMETYPES.includes(mimetype)) return cb(null, true);
     return cb(new Error(`Invalid image type: ${mimetype}`), false);
   }
 
-  if (fieldname === "videos") {
+  if (mimetype.startsWith("video/")) {
     if (VIDEO_MIMETYPES.includes(mimetype)) return cb(null, true);
     return cb(new Error(`Invalid video type: ${mimetype}`), false);
   }
 
-  // If unknown field, reject (explicit)
-  return cb(new Error(`Unexpected file field: ${fieldname}`), false);
+  // unknown/unsupported type
+  return cb(new Error(`Unsupported file type: ${mimetype}`), false);
 };
 
 const upload = multer({
@@ -45,10 +50,10 @@ const upload = multer({
   limits: {
     // single file size limit 50MB (adjust if needed)
     fileSize: Number(
-      process.env.UPLOAD_MAX_FILE_SIZE_BYTES || 50 * 1024 * 1024,
+      process.env.UPLOAD_MAX_FILE_SIZE_BYTES || 100 * 1024 * 1024,
     ),
     // limit overall files per request to avoid OOM
-    files: Number(process.env.UPLOAD_MAX_FILES || 6),
+    files: Number(process.env.UPLOAD_MAX_FILES || 15),
   },
   fileFilter,
 });

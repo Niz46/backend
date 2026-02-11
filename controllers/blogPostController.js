@@ -44,17 +44,50 @@ const createPost = async (req, res) => {
     }
 
     // --- helpers to normalize incoming fields ---
-    const normalizeArray = (val) => {
-      if (!val) return [];
-      if (Array.isArray(val)) return val;
-      // if client sent JSON stringified array
-      try {
-        const parsed = JSON.parse(val);
-        if (Array.isArray(parsed)) return parsed;
-      } catch (e) {
-        // not JSON — fall back to string handling below
+    const pickFirstMediaUrl = (val) => {
+      // Accepts: undefined, string, array, or cloudinary-style object { secure_url, url, public_id }
+      if (!val) return null;
+
+      // If array: pick first truthy element
+      if (Array.isArray(val)) {
+        const first = val.find(Boolean);
+        if (!first) return null;
+        return pickFirstMediaUrl(first);
       }
-      return [String(val)];
+
+      // If an object returned from cloudinary uploader
+      if (typeof val === "object") {
+        return val.secure_url || val.url || val.public_url || null;
+      }
+
+      // string
+      if (typeof val === "string") {
+        return val;
+      }
+
+      return null;
+    };
+
+    const mapPostResponse = (post) => {
+      const tags = (post.postTags || [])
+        .map((pt) => pt.tag?.name)
+        .filter(Boolean);
+      const { postTags, ...rest } = post;
+
+      const normalized = {
+        ...rest,
+        tags,
+        // normalize cover arrays/objects to a single string URL or null
+        coverImageUrl: pickFirstMediaUrl(rest.coverImageUrl),
+        coverVideoUrl: pickFirstMediaUrl(rest.coverVideoUrl),
+        // ensure author exists and its profile image normalized
+        author: {
+          ...(rest.author || {}),
+          profileImageUrl: pickFirstMediaUrl(rest.author?.profileImageUrl),
+        },
+      };
+
+      return normalized;
     };
 
     const normalizeTags = (val) => {
