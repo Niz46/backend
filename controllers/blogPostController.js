@@ -4,12 +4,149 @@ const slugify = require("slugify");
 const agenda = require("../config/agenda");
 
 /**
- * Helper to map the Post with postTags -> tags array
+ * Helper: pick first usable media url from a variety of possible inputs
+ * Accepts undefined, string, array, or cloudinary-style object { secure_url, url, public_id }
+ */
+const pickFirstMediaUrl = (val) => {
+  if (!val) return null;
+
+  // If array: pick first truthy element
+  if (Array.isArray(val)) {
+    const first = val.find(Boolean);
+    if (!first) return null;
+    return pickFirstMediaUrl(first);
+  }
+
+  // If an object returned from cloudinary uploader
+  if (typeof val === "object") {
+    return val.secure_url || val.url || val.public_url || null;
+  }
+
+  // string
+  if (typeof val === "string") {
+    return val;
+  }
+
+  return null;
+};
+
+/**
+ * normalizeArray - ensures value becomes an array (of strings/objects) or [].
+ * Handles: undefined/null, arrays, JSON-stringified arrays, comma-separated strings,
+ * single string, objects (returned as single-item array).
+ */
+const normalizeArray = (val) => {
+  if (val === undefined || val === null) return [];
+
+  // Already an array -> filter out falsy
+  if (Array.isArray(val)) {
+    return val
+      .map((v) => (v === null || v === undefined ? null : v))
+      .filter(Boolean);
+  }
+
+  // Object -> return as single-element array
+  if (typeof val === "object") {
+    return [val];
+  }
+
+  // String -> try JSON parse for JSON-encoded arrays first
+  if (typeof val === "string") {
+    const raw = val.trim();
+    if (/^\[.*\]$/.test(raw)) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((v) => (v === null || v === undefined ? null : v))
+            .filter(Boolean);
+        }
+      } catch (e) {
+        // ignore and fallback to comma split
+      }
+    }
+
+    // comma-separated
+    if (raw.includes(",")) {
+      return raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+
+    // single string
+    return [raw];
+  }
+
+  // Fallback coerce to string
+  return [String(val)];
+};
+
+/**
+ * normalizeTags - ensures tags become an array of trimmed strings
+ * Accepts: array, JSON stringified array, comma-separated string, or single string
+ */
+const normalizeTags = (val) => {
+  if (!val && val !== 0) return [];
+  if (Array.isArray(val)) {
+    return val.map((t) => String(t).trim()).filter(Boolean);
+  }
+  if (typeof val === "string") {
+    const raw = val.trim();
+    if (/^\[.*\]$/.test(raw)) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed.map((t) => String(t).trim()).filter(Boolean);
+        }
+      } catch (e) {
+        // ignore and fallback to comma split
+      }
+    }
+    return raw
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+  }
+  return [String(val).trim()].filter(Boolean);
+};
+
+/**
+ * normalizeMediaArrayForResponse - ensure response always contains arrays for media fields
+ * Returns an array of normalized URLs (strings) or [].
+ */
+const normalizeMediaArrayForResponse = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) {
+    return val.map((item) => pickFirstMediaUrl(item)).filter(Boolean);
+  }
+  // single value -> try to pick and return single-item array
+  const single = pickFirstMediaUrl(val);
+  return single ? [single] : [];
+};
+
+/**
+ * Helper to map the Post with postTags -> tags array and normalize media URLs / author image
+ * Ensures coverImageUrl and coverVideoUrl are arrays in the response.
  */
 const mapPostResponse = (post) => {
   const tags = (post.postTags || []).map((pt) => pt.tag?.name).filter(Boolean);
   const { postTags, ...rest } = post;
-  return { ...rest, tags };
+
+  const normalized = {
+    ...rest,
+    tags,
+    // ensure response shape: coverImageUrl and coverVideoUrl are arrays
+    coverImageUrl: normalizeMediaArrayForResponse(rest.coverImageUrl),
+    coverVideoUrl: normalizeMediaArrayForResponse(rest.coverVideoUrl),
+    // ensure author exists and its profile image normalized to single string (or null)
+    author: {
+      ...(rest.author || {}),
+      profileImageUrl: pickFirstMediaUrl(rest.author?.profileImageUrl),
+    },
+  };
+
+  return normalized;
 };
 
 /**
@@ -37,87 +174,15 @@ const createPost = async (req, res) => {
       isDraft = false,
       generatedByAI = false,
     } = req.body;
-    const authorId = req.user.id;
+    const authorId = req.user && req.user.id;
+
+    if (!authorId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
 
     if (!title || !content) {
       return res.status(400).json({ message: "Missing fields" });
     }
-
-    // --- helpers to normalize incoming fields ---
-    const pickFirstMediaUrl = (val) => {
-      // Accepts: undefined, string, array, or cloudinary-style object { secure_url, url, public_id }
-      if (!val) return null;
-
-      // If array: pick first truthy element
-      if (Array.isArray(val)) {
-        const first = val.find(Boolean);
-        if (!first) return null;
-        return pickFirstMediaUrl(first);
-      }
-
-      // If an object returned from cloudinary uploader
-      if (typeof val === "object") {
-        return val.secure_url || val.url || val.public_url || null;
-      }
-
-      // string
-      if (typeof val === "string") {
-        return val;
-      }
-
-      return null;
-    };
-
-    const mapPostResponse = (post) => {
-      const tags = (post.postTags || [])
-        .map((pt) => pt.tag?.name)
-        .filter(Boolean);
-      const { postTags, ...rest } = post;
-
-      const normalized = {
-        ...rest,
-        tags,
-        // normalize cover arrays/objects to a single string URL or null
-        coverImageUrl: pickFirstMediaUrl(rest.coverImageUrl),
-        coverVideoUrl: pickFirstMediaUrl(rest.coverVideoUrl),
-        // ensure author exists and its profile image normalized
-        author: {
-          ...(rest.author || {}),
-          profileImageUrl: pickFirstMediaUrl(rest.author?.profileImageUrl),
-        },
-      };
-
-      return normalized;
-    };
-
-    const normalizeTags = (val) => {
-      // Accepts: array, JSON stringified array, comma-separated string, or single string
-      if (!val) return [];
-      if (Array.isArray(val)) {
-        return val.map((t) => String(t).trim()).filter(Boolean);
-      }
-      if (typeof val === "string") {
-        const raw = val.trim();
-        // try JSON parse first
-        if (/^\[.*\]$/.test(raw)) {
-          try {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-              return parsed.map((t) => String(t).trim()).filter(Boolean);
-            }
-          } catch (e) {
-            // ignore and fallback to comma split
-          }
-        }
-        // fallback: comma separated list
-        return raw
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean);
-      }
-      // otherwise coerce
-      return [String(val).trim()].filter(Boolean);
-    };
 
     // Normalize incoming cover arrays (middleware may already have attached arrays of Cloudinary URLs)
     const coverImageUrl = normalizeArray(req.body.coverImageUrl);

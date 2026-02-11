@@ -26,18 +26,15 @@ function parseGenAIError(err) {
       out.providerRaw = err.response.data;
       const data = err.response.data;
 
-      // Google-style top-level wrapper might be stringified; try common shapes:
-      const errorObj = data.error || data; // sometimes the API returns { error: { ... } }
+      const errorObj = data.error || data;
       if (errorObj) {
         out.message = errorObj.message || JSON.stringify(errorObj);
-        // status code
         if (errorObj.code) out.statusCode = Number(errorObj.code);
         if (errorObj.status && !out.statusCode) {
-          // "RESOURCE_EXHAUSTED" etc.
+          // map Google-style status to HTTP where possible
           out.statusCode =
             errorObj.status === "RESOURCE_EXHAUSTED" ? 429 : out.statusCode;
         }
-        // look into details for RetryInfo
         if (Array.isArray(errorObj.details)) {
           for (const d of errorObj.details) {
             if (
@@ -45,9 +42,8 @@ function parseGenAIError(err) {
               d["@type"].includes("RetryInfo") &&
               d.retryDelay
             ) {
-              // retryDelay might be "46s"
               const s = String(d.retryDelay || "");
-              const m = s.match(/(\d+)(s|m)?/);
+              const m = s.match(/(\d+)(s|m)?/i);
               if (m) {
                 const value = Number(m[1]) || 0;
                 out.retryAfterSeconds = m[2] === "m" ? value * 60 : value;
@@ -60,7 +56,6 @@ function parseGenAIError(err) {
     } else if (typeof err === "string") {
       out.providerRaw = err;
       out.message = err;
-      // try to find JSON inside string
       const idx = err.indexOf("{");
       if (idx !== -1) {
         const jsonPart = err.slice(idx);
@@ -77,7 +72,7 @@ function parseGenAIError(err) {
                   d.retryDelay
                 ) {
                   const s = String(d.retryDelay);
-                  const m = s.match(/(\d+)(s|m)?/);
+                  const m = s.match(/(\d+)(s|m)?/i);
                   if (m) {
                     out.retryAfterSeconds =
                       m[2] === "m" ? Number(m[1]) * 60 : Number(m[1]);
@@ -98,13 +93,16 @@ function parseGenAIError(err) {
       out.message = String(err);
     }
   } catch (e) {
-    // parsing failed — return best-effort
     out.providerRaw = err;
     out.message = err?.message || String(err);
   }
 
   // fallbacks
-  if (!out.statusCode && out.message && out.message.includes("Quota"))
+  if (
+    !out.statusCode &&
+    out.message &&
+    /quota|resource_exhausted|RESOURCE_EXHAUSTED/i.test(out.message)
+  )
     out.statusCode = 429;
   if (!out.message && out.providerRaw)
     out.message = String(out.providerRaw).slice(0, 500);
@@ -113,43 +111,54 @@ function parseGenAIError(err) {
 }
 
 /**
- * If it's a quota / rate-limit error, respond 429 with Retry-After header.
- * Otherwise respond 500.
+ * Respond to client with a single, de-duplicated JSON error.
+ * If quota/rate-limit, send 429 and Retry-After header when available.
  */
 function respondWithProviderError(res, parsed) {
-  if (
+  // prevent double-send
+  if (res.headersSent) return;
+
+  const isQuota =
     parsed.statusCode === 429 ||
     (parsed.message &&
-      /quota|Resource_exhausted|RESOURCE_EXHAUSTED/i.test(parsed.message))
-  ) {
-    if (parsed.retryAfterSeconds) {
-      res.set("Retry-After", String(parsed.retryAfterSeconds));
-    }
-    return res.status(429).json({
-      message: "AI provider quota/rate limit reached. Try again later.",
-      detail: parsed.message,
-      retryAfterSeconds: parsed.retryAfterSeconds || null,
-      provider: parsed.providerRaw
-        ? typeof parsed.providerRaw === "string"
-          ? parsed.providerRaw
-          : parsed.providerRaw
-        : undefined,
-    });
+      /quota|Resource_exhausted|RESOURCE_EXHAUSTED/i.test(parsed.message));
+
+  const statusCode = isQuota ? 429 : 500;
+
+  if (isQuota && parsed.retryAfterSeconds && !res.headersSent) {
+    res.set("Retry-After", String(parsed.retryAfterSeconds));
   }
 
-  // generic server error
-  return res.status(500).json({
-    message: "AI provider error",
-    detail: parsed.message,
-    provider: parsed.providerRaw,
-  });
+  // Avoid returning the same string twice (detail vs provider).
+  const body = {
+    message: isQuota
+      ? "AI provider quota/rate limit reached. Try again later."
+      : "AI provider error",
+    detail: parsed.message || null,
+    retryAfterSeconds: parsed.retryAfterSeconds || null,
+  };
+
+  // Only include provider if it contains additional info (not identical to detail)
+  try {
+    const providerStr =
+      typeof parsed.providerRaw === "string"
+        ? parsed.providerRaw
+        : JSON.stringify(parsed.providerRaw);
+    if (providerStr && providerStr.trim() !== (parsed.message || "").trim()) {
+      body.provider = parsed.providerRaw;
+    }
+  } catch (e) {
+    // If serializing provider fails, omit it to avoid huge payloads.
+  }
+
+  return res.status(statusCode).json(body);
 }
 
 /**
  * Lightweight transient retry helper for network errors (not quota).
  * Retries up to 'attempts' with exponential backoff.
  */
-async function transientRetry(fn, attempts = 1, initialDelayMs = 500) {
+async function transientRetry(fn, attempts = 2, initialDelayMs = 500) {
   let attempt = 0;
   let lastErr;
   while (attempt <= attempts) {
@@ -163,12 +172,14 @@ async function transientRetry(fn, attempts = 1, initialDelayMs = 500) {
         parsed.statusCode === 429 ||
         /quota|RESOURCE_EXHAUSTED/i.test(parsed.message || "")
       ) {
-        throw err; // bubble up so caller can handle with 429
+        // bubble up so caller can handle with 429
+        throw err;
       }
-      // otherwise backoff & retry
-      const delay = initialDelayMs * Math.pow(1, attempt);
-      await new Promise((r) => setTimeout(r, delay));
       attempt++;
+      if (attempt > attempts) break;
+      // exponential backoff (2^attempt)
+      const delay = initialDelayMs * Math.pow(2, attempt - 1);
+      await new Promise((r) => setTimeout(r, delay));
     }
   }
   throw lastErr;
@@ -186,12 +197,10 @@ const generateBlogPost = async (req, res) => {
 
     const prompt = `Write a markdown-formatted blog post titled "${title}". Use a ${tone} tone. Include introduction, subheadings, examples if relevant, and a conclusion.`;
 
-    // Attempt a small transient retry for network flakiness
     const response = await transientRetry(() =>
       ai.models.generateContent({ model: "gemini-2.5-pro", contents: prompt }),
     );
 
-    // library shape: response.text or response?.output or similar — preserve your original usage
     const rawText =
       response?.text ??
       response?.output ??
@@ -221,6 +230,7 @@ const generateBlogPostIdeas = async (req, res) => {
       response?.text ??
       response?.output ??
       (typeof response === "string" ? response : null);
+
     if (!rawText) {
       return res.status(502).json({ message: "Empty AI response" });
     }
@@ -229,6 +239,7 @@ const generateBlogPostIdeas = async (req, res) => {
       .replace(/^```json\s*/, "")
       .replace(/```$/, "")
       .trim();
+
     // parse safely
     let data;
     try {
@@ -268,6 +279,7 @@ const generateCommentReply = async (req, res) => {
       response?.text ??
       response?.output ??
       (typeof response === "string" ? response : null);
+
     return res.status(200).json({ reply: rawText });
   } catch (err) {
     console.error("generateCommentReply error:", err);
@@ -292,6 +304,7 @@ const generatePostSummary = async (req, res) => {
       response?.text ??
       response?.output ??
       (typeof response === "string" ? response : null);
+
     if (!rawText) return res.status(502).json({ message: "Empty AI response" });
 
     const cleanedText = rawText
