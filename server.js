@@ -118,7 +118,8 @@ app.use(
 );
 
 // ─── 7) Body parsing (Prisma does not require a separate connect call) ───────
-app.use(express.json());
+app.use(express.json({ limit: "30mb" }));
+app.use(express.urlencoded({ limit: "30mb", extended: true }));
 
 // ─── 8) Mount your API routes ─────────────────────────────────────────────────
 app.use("/api/auth", require("./routes/authRoutes"));

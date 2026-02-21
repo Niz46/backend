@@ -53,7 +53,7 @@ const upload = multer({
       process.env.UPLOAD_MAX_FILE_SIZE_BYTES || 100 * 1024 * 1024,
     ),
     // limit overall files per request to avoid OOM
-    files: Number(process.env.UPLOAD_MAX_FILES || 15),
+    files: Number(process.env.UPLOAD_MAX_FILES || 20),
   },
   fileFilter,
 });
