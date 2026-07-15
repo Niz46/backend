@@ -90,7 +90,8 @@ const uploadToCloudinary = (options = {}) => {
             use_filename: false,
             unique_filename: true,
             overwrite: false,
-            tags: req.body.category ? [req.body.category] : ["Other"],
+            tags: req.body.category || req.query.category || "Other",
+            
             ...imageUploadOptions,
           };
           const result = await uploadBuffer(file.buffer, opts);
@@ -116,7 +117,7 @@ const uploadToCloudinary = (options = {}) => {
             use_filename: false,
             unique_filename: true,
             overwrite: false,
-            tags: req.body.category ? [req.body.category] : ["Other"],
+            tags: req.body.category || req.query.category || "Other",
             ...videoUploadOptions,
           };
           const result = await uploadBuffer(file.buffer, opts);

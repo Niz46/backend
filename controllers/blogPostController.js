@@ -2,6 +2,7 @@
 const prisma = require("../config/prisma");
 const slugify = require("slugify");
 const agenda = require("../config/agenda");
+const cloudinary = require("cloudinary").v2;
 
 /**
  * Helper: pick first usable media url from a variety of possible inputs
@@ -147,6 +148,35 @@ const mapPostResponse = (post) => {
   };
 
   return normalized;
+};
+
+// GET GALLERY IMAGES BY TAG
+const getGalleryImages = async (req, res) => {
+  try {
+    const { tag } = req.query;
+    if (!tag) {
+      return res.status(400).json({ message: "Tag parameter is required." });
+    }
+
+    // Search Cloudinary assets directly by tag
+    const result = await cloudinary.search
+      .expression(`tags:${tag}`)
+      .sort_by("created_at", "desc")
+      .max_results(100)
+      .execute();
+
+    // Format the response structure to match your GalleryCard
+    const formattedImages = result.resources.map((img) => ({
+      src: img.secure_url,
+      title: img.filename || `${tag} Image`,
+      author: tag,
+    }));
+
+    return res.status(200).json(formattedImages);
+  } catch (error) {
+    console.error("Cloudinary fetch error:", error);
+    return res.status(500).json({ message: "Failed to fetch images from Cloudinary" });
+  }
 };
 
 /**
@@ -658,4 +688,5 @@ module.exports = {
   incrementView,
   likePost,
   getTopPosts,
+  getGalleryImages,
 };

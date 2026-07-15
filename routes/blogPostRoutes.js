@@ -13,6 +13,7 @@ const {
   incrementView,
   likePost,
   getTopPosts,
+  getGalleryImages,
 } = require("../controllers/blogPostController");
 
 const { protect } = require("../middlewares/authMiddlewares");
@@ -57,5 +58,6 @@ router.get("/search", searchPosts);
 router.post("/:id/view", incrementView);
 router.post("/:id/like", protect, likePost);
 router.get("/trending", getTopPosts);
+router.get("/gallery", getGalleryImages);
 
 module.exports = router;
