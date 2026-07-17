@@ -5,9 +5,11 @@ const createEvent = async (req, res) => {
   try {
     const { title, description, date, location } = req.body;
 
-    // The uploadToCloudinary middleware attaches URLs to req.body.images
-    const coverImageUrl =
-      req.body.images && req.body.images.length > 0 ? req.body.images[0] : null;
+    // FIX: The uploadToCloudinary middleware attaches an array of string URLs to req.body.coverImageUrl
+    const coverImage =
+      req.body.coverImageUrl && req.body.coverImageUrl.length > 0
+        ? req.body.coverImageUrl[0]
+        : null;
 
     const eventDate = new Date(date);
 
@@ -23,10 +25,7 @@ const createEvent = async (req, res) => {
         description,
         date: eventDate,
         location,
-        coverImageUrl:
-          typeof coverImageUrl === "object"
-            ? coverImageUrl.secure_url
-            : coverImageUrl,
+        coverImageUrl: coverImage, // Now securely assigns the string URL
       },
     });
 
@@ -37,7 +36,7 @@ const createEvent = async (req, res) => {
 
     return res.status(201).json(newEvent);
   } catch (err) {
-    console.error(err);
+    console.error("Error creating event:", err);
     return res
       .status(500)
       .json({ message: "Failed to create event", error: err.message });
@@ -54,6 +53,7 @@ const getUpcomingEvents = async (req, res) => {
     });
     return res.json(events);
   } catch (err) {
+    console.error("Error fetching events:", err);
     return res.status(500).json({ message: "Failed to fetch events" });
   }
 };
@@ -68,8 +68,10 @@ const deleteEvent = async (req, res) => {
 
     return res.json({ message: "Event deleted manually" });
   } catch (err) {
-    if (err.code === "P2025")
+    if (err.code === "P2025") {
       return res.status(404).json({ message: "Event not found" });
+    }
+    console.error("Error deleting event:", err);
     return res.status(500).json({ message: "Failed to delete event" });
   }
 };
