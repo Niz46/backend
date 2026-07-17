@@ -14,6 +14,7 @@ const agenda = require("./config/agenda"); // Agenda (uses MONGO_URL)
 // IMPORTANT: require job definitions AFTER agenda is imported so they can import agenda
 // and define jobs before we call agenda.start().
 require("./jobs/emailJobs");
+require("./jobs/eventJobs");
 
 const startAgenda = async () => {
   try {
